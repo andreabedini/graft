@@ -2,6 +2,7 @@
 
 module Main (main) where
 
+import AstTests (astProperties)
 import BuilderTests (builderProperties)
 import ChildEditTests (childEditProperties)
 import Control.Monad (unless)
@@ -426,7 +427,7 @@ main = do
     , run "covering range lookup" propCoveringRange
     , run "half-open range invariants" propRanges
     , run "cursor empty, boundary, shared-occurrence and large-range regressions" cursorRegressions
-    ] ++ [run title prop | (title, prop) <- builderProperties ++ childEditProperties]
+    ] ++ [run title prop | (title, prop) <- builderProperties ++ childEditProperties ++ astProperties]
   unless (all isSuccess results) exitFailure
   where
     run title prop = do
