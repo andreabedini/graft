@@ -7,7 +7,8 @@ description:
     Green trees preserve token text, cache UTF-8 byte lengths, and support
     structural sharing. Immutable red cursors provide navigation, source ranges,
     and persistent subtree and child editing. Pure builders support positional
-    checkpoints and reuse of existing subtrees. Lexing and parsing are left to callers.
+    checkpoints and reuse of existing subtrees. Typed AST views retain concrete
+    syntax through cursors. Lexing and parsing are left to callers.
 category:        Language
 license:         MIT
 license-file:    LICENSE
@@ -15,6 +16,7 @@ author:          Andrea Bedini
 maintainer:      andrea@bedini.au
 build-type:      Simple
 tested-with:     GHC ==9.12.2
+extra-source-files: examples/ExactUpdate.hs
 extra-doc-files:
     README.md
     CHANGELOG.md

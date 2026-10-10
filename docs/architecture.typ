@@ -190,6 +190,56 @@ retains the green core's UTF-8 counting cost. Finishing checks the open stack
 to report its depth. Saved builders retain their earlier construction state,
 so clients can release old values when branching is no longer needed.
 
+== Typed AST views and semantic updates
+
+The fifth milestone adds `AstNode` and `AstToken`, Haskell type classes for
+application-defined views over node and token occurrences. Each class associates
+a view with the application's existing syntax-kind type. A view is usually a
+newtype around a cursor, with a fallible cast and a syntax accessor. This retains
+concrete text, trivia, paths, byte ranges, and the original snapshot without
+constructing a separate semantic tree.
+
+`matchNode` and `matchToken` check element form and a kind predicate, then pass
+the unchanged cursor to the application's wrapper. Instances must reject the
+opposite form. A successful cast must retain the exact occurrence and snapshot,
+and casting the resulting view's syntax must succeed again. These are instance
+laws, not properties that Haskell's type system enforces. Private constructors
+and the supplied helpers support the usual implementation.
+
+Typed fields select matching immediate node or token children in source order.
+They do not search grandchildren. List results are lazy, and first-match queries
+stop at the first successful cast. `astParent` casts only the immediate parent.
+`astAncestors` returns matching ancestors nearest first, excluding the focus.
+Empty tokens remain visible, and repeated shared green values retain distinct
+paths and ranges. A view retains its ancestors and therefore its original root.
+
+Casting checks a view's admissibility, not a grammar. An expression with missing
+operands can still have an expression view. Field accessors return optional
+values or lists, leaving required fields, duplicate handling, and token spelling
+validation to the application. No parser or lexer belongs to this layer.
+
+The application example `examples/ExactUpdate.hs` reads an integer from a typed
+number token. Its setter retains the original token when the value is unchanged,
+including the spelling `001`. A changed value uses a new number token and
+rebuilds ancestors through the retained cursor. Surrounding spacing, comment,
+and CRLF spelling remain exact. Missing fields or invalid numeric text return
+no update. This is one explicit semantic policy, not a general bidirectional
+update protocol supplied by Graft.
+
+Rowan's node trait and Graft's node class both supply typed syntax wrappers.
+Graft directly associates views with kind types, without Rowan's language-tag
+conversion, and adds a corresponding token class. Lazy lists replace a dedicated
+typed-child iterator. Match helpers check form in addition to kind because
+Graft uses one cursor type for nodes and tokens. There is no separate kind-only
+cast query or equivalent of Rowan's location-based syntax/AST pointers yet.
+Location handles need a design that addresses ambiguous empty and nested ranges.
+
+The usual newtype cast requires no tree traversal beyond the supplied predicate.
+Typed navigation scans candidate child lists or ancestor chains, with work
+determined by the user's cast implementation. Views perform no copying or
+normalization of source text. No allocation or runtime equivalence with Rowan
+is claimed without benchmarks.
+
 == Evidence and upstream study
 
 The first milestone tests rendering and byte counts against an independent model
@@ -223,6 +273,13 @@ splices, validation order, invalid paths, and token targets. Regressions cover
 empty elements, retained trivia, Unicode, extreme indices, and large cached
 lengths without rendering shared trees.
 
+Typed-view properties compare casts and syntax round trips with model occurrences,
+including their green focus, root, path, and byte range. They check immediate
+node/token fields, parent and ancestor filtering, token replacement, and child
+insertion through typed views. New trees are checked against independent source
+and range oracles. Regressions cover incomplete fields, opposite forms with the
+same kind, shared occurrences, first-match laziness, and large cached ranges.
+
 The implementation study used Rowan revision
 `b6f1cb6494a99a2264186d110b1b170989774814`, retrieved on 10 October 2026;
 its manifest identifies version 0.17.0. The inspected sources were:
@@ -233,6 +290,8 @@ its manifest identifies version 0.17.0. The inspected sources were:
   rendering, trivia, and green child insertion/removal/splicing.
 - #link(upstream + "src/cursor.rs")[Cursors]: contextual navigation and
   replacement through ancestors.
+- #link(upstream + "src/ast.rs")[AST support]: the node trait, typed child
+  filtering, and location-based syntax and AST pointers.
 - #link(upstream + "src/green/builder.rs")[Builders] and
   #link(upstream + "src/green/node_cache.rs")[cache]: the pending forest, open-node
   stack, checkpoint validation, suffix wrapping, and interning.
@@ -244,12 +303,14 @@ its manifest identifies version 0.17.0. The inspected sources were:
 
 == Remaining work
 
-- The next milestone: typed AST views that keep access to concrete tokens and trivia.
+- The next milestone: a benchmark baseline for construction, wide/deep navigation,
+  repeated edits, rendering, and memory residency, before choosing interning,
+  vectors, additional offset caches, or other layouts.
+- Location handles and occurrence tracking across snapshots.
 - Explicit trivia ownership and the desired Rowan compatibility boundary.
-- Benchmarks of wide/deep trees, repeated edits, rendering, and memory residency
-  before choosing interning, vectors, additional offset caches, or other layouts.
 
-Bidirectional semantic updates will need a separate correspondence between AST
-views and concrete syntax. The green core supplies exact text and persistent
-edits; it cannot decide where new comments belong, which spelling to prefer, or
-how to reconcile a changed semantic value with retained syntax.
+General bidirectional semantic updates still need an application correspondence
+between semantic values and concrete syntax. Typed views expose the retained
+syntax, and persistent edits reconstruct roots. They cannot decide where new
+comments belong, which spelling to prefer, or how to reconcile every changed
+semantic value with retained syntax.

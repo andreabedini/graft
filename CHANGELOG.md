@@ -22,3 +22,8 @@
   path-selected nodes, and cursor focuses, with structured child-edit errors.
 * Shared-model properties for unchanged occurrences, shifted paths and byte
   ranges, identity edits, inverse edits, and child-edit validation order.
+* Cursor-backed typed node/token views with associated syntax-kind types,
+  form-and-kind cast helpers, and lazy typed field and ancestor navigation.
+* Model properties for typed casting laws, occurrences, fields, and edits, with
+  malformed-syntax and lazy-query regressions. An exact-update example preserves
+  existing number spelling when the semantic value does not change.

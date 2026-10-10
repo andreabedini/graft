@@ -12,8 +12,9 @@ cursors** (zippers), contextual navigation, UTF-8 source ranges, boundary-aware
 lookup, and replacement through a focus. The third milestone adds pure builders
 with checkpoints for wrapping previously emitted elements. The API is
 experimental. The fourth milestone adds child insertion, removal, and splicing
-through green nodes, paths, and cursor focuses. Interning and typed AST views
-remain future work.
+through green nodes, paths, and cursor focuses. The fifth milestone adds typed
+node and token views that retain their original syntax cursors. Interning remains
+future work.
 
 ## Build and test
 
@@ -41,6 +42,9 @@ lifetime, empty values, and reuse of large cached lengths.
 Child-edit properties check exact source, caches, unchanged occurrences, shifted
 paths and ranges, insertion/removal inverses, and validation order. Regressions
 cover extreme indices and empty elements that shift paths without shifting text.
+Typed-view properties check casting laws, retained occurrences, immediate fields,
+parents and ancestors, and exact-preserving edits. Regressions cover malformed
+syntax, repeated shared occurrences, lazy first-match queries, and large ranges.
 
 ## Preserve formatting while changing a subtree
 
@@ -85,7 +89,7 @@ UTF-8 byte sequences is outside this representation's contract.
 ## Core API
 
 Import `Graft`, or use `Graft.Green`, `Graft.Edit`, `Graft.Range`, `Graft.Cursor`,
-and `Graft.Builder` separately. `GreenNode kind`
+`Graft.Builder`, and `Graft.Ast` separately. `GreenNode kind`
 and `GreenToken kind` have hidden constructors. `GreenElement kind` exposes
 `Node` and `Token` for pattern matching. `kind` is the caller's syntax-kind type.
 
@@ -286,6 +290,77 @@ an empty node shifts later child indices even though no byte offsets change.
 Paths from the old snapshot must be reconsidered after an edit. These operations
 apply one edit to one snapshot, without tracking occurrences across versions.
 
+## View concrete syntax through typed fields
+
+An abstract syntax tree (AST) view wraps a syntax cursor. It retains the
+original token text, trivia, path, and byte range. Enable `TypeFamilies` in your
+application module to define the associated syntax-kind types.
+
+Using `Kind` from the first example:
+
+```haskell
+newtype Expression = Expression (Cursor Kind)
+instance AstNode Expression where
+  type AstNodeKind Expression = Kind
+  castNode = matchNode (== Expr) Expression
+  nodeSyntax (Expression cursor) = cursor
+
+newtype NumberLiteral = NumberLiteral (Cursor Kind)
+instance AstToken NumberLiteral where
+  type AstTokenKind NumberLiteral = Kind
+  castToken = matchToken (== Number) NumberLiteral
+  tokenSyntax (NumberLiteral cursor) = cursor
+
+expressionNumber :: Expression -> Maybe NumberLiteral
+expressionNumber = astToken . nodeSyntax
+
+setNumberText :: Text -> NumberLiteral -> GreenElement Kind
+setNumberText text literal =
+  replaceFocus (Token (greenToken Number text)) (tokenSyntax literal)
+```
+
+`astChild (newCursor (Node original)) :: Maybe Expression` selects the expression.
+`expressionNumber` selects its first immediate number token. `setNumberText`
+returns a new green root, preserving surrounding tokens and the old view.
+The application decides the replacement spelling and validates its semantic value.
+
+| Operation | Contract |
+| --- | --- |
+| `castNode`, `castToken` | Try to obtain an application view. Failure returns `Nothing`. |
+| `nodeSyntax`, `tokenSyntax` | Return the view's original cursor, with all concrete syntax and context. |
+| `matchNode accepts wrap`, `matchToken accepts wrap` | Check node/token form and the kind predicate before wrapping the original cursor. |
+| `astChild`, `astChildren` | First or all matching immediate node children in source order. Tokens are skipped. |
+| `astToken`, `astTokens` | First or all matching immediate token children, including empty tokens. Nodes are skipped. |
+| `astParent` | Cast only the immediate parent. A mismatched parent returns `Nothing`. |
+| `astAncestors` | All matching ancestors, nearest first, excluding the focus. |
+
+Field helpers do not search grandchildren. A token focus has no child fields.
+Missing or mismatched fields return `Nothing` or an empty list. List results are
+lazy, and first-match queries stop at the first successful cast. Duplicate fields
+remain in source order. Grammar-specific accessors decide whether duplicates are errors.
+
+Instances must reject the opposite element form and retain the supplied cursor
+unchanged after a successful cast. Casting a view's own syntax must succeed again.
+The type class cannot enforce these laws. Hide your wrapper constructors and use
+`matchNode` or `matchToken` for the usual form-and-kind check. That check accepts
+incomplete nodes or malformed token spelling. Interpret values and validate fields
+in application code, with explicit failure for missing or invalid data.
+
+A view retains its snapshot and ancestors, so it also keeps the original root
+reachable. Start a new cursor and cast again after editing. Views expose no
+occurrence equality or handle that tracks an element across tree versions.
+
+The complete [exact-update example](examples/ExactUpdate.hs) interprets a number
+as an integer. An unchanged value retains the spelling `001`. A changed value
+uses a new number token while preserving the surrounding spacing, comment, and
+CRLF line ending. Missing fields and invalid numeric text return `Nothing`.
+The application supplies the tree and its numeric interpretation policy.
+
+```sh
+cabal build all
+cabal exec -- runghc -package=graft examples/ExactUpdate.hs
+```
+
 ## Architecture and remaining work
 
 Graft retains Rowan's separation of immutable syntax from contextual navigation.
@@ -301,6 +376,7 @@ Its initial representation deliberately differs:
 | Mutable builder with positional checkpoints | Pure persistent builder with the same positional wrapping and structured errors |
 | Builder cache for deduplication | Explicit value reuse; no interning |
 | Generic range bounds for green child splicing | Validated half-open child indices with node/path/focus entry points |
+| `AstNode` trait, language conversion, and `AstChildren` iterator | `AstNode`/`AstToken` classes with associated kind types and lazy lists |
 
 The [architecture note](docs/architecture.typ) explains the decisions, costs,
 upstream sources reviewed, and next steps. Build its PDF with Typst:
@@ -309,9 +385,9 @@ upstream sources reviewed, and next steps. Build its PDF with Typst:
 typst compile docs/architecture.typ docs/architecture.pdf
 ```
 
-The next milestone is typed AST views that retain access to concrete syntax.
-Later work includes benchmarks before selecting an interner or changing the
-representation. Attached trivia and compatibility with
+The next milestone is a benchmark baseline for construction, navigation, edits,
+rendering, and memory residency. Results will guide any interner or representation
+changes. Location handles, attached trivia, and compatibility with
 Rowan's current API require further design. Semantic update policy remains a
 layer above the concrete tree.
 
