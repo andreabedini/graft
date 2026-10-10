@@ -176,8 +176,8 @@ checkFixtures = do
       assert "builder tokens" (buildTokens texts == node)
       assert "builder reuse" (buildReuse node == node)
       assert "checkpoint source" (renderNode (buildCheckpoint node) == Text.concat texts)
-      assert "wide UTF-8 cache" (nodeTextLength node == fromIntegral (sum
-        [4 + length (show index) | index <- [1 .. count]]))
+      assert "wide UTF-8 cache" (nodeTextLength node == sum
+        [4 + length (show index) | index <- [1 .. count]])
       assert "last offset" (cursorEnd (checked (childAt (count - 1) root)) == nodeTextLength node)
       assert "sibling observation" (siblingSum root == sum (map cursorEnd (children root)))
       assert "typed last token" (cursorEnd (tokenSyntax (selected (astToken root :: Maybe Numbered))) == nodeTextLength node)

@@ -99,7 +99,7 @@ and `GreenToken kind` have hidden constructors. `GreenElement kind` exposes
 | `greenNode`, `greenToken` | Construct values and establish cached lengths. Empty values are allowed. |
 | `nodeKind`, `tokenKind`, `elementKind` | Read caller-defined syntax kinds. |
 | `nodeChildren`, `tokenText` | Read ordered children or exact leaf text. |
-| `nodeTextLength`, `tokenTextLength`, `elementTextLength` | Read cached UTF-8 byte counts (`TextLength`, an alias for `Natural`). |
+| `nodeTextLength`, `tokenTextLength`, `elementTextLength` | Read cached UTF-8 byte counts (`TextLength`, an alias for `Int`). |
 | `renderNode`, `renderToken`, `renderElement` | Concatenate leaf text in source order. |
 | `elementAt path root` | Look up an element using zero-based child indices. |
 | `replaceAt path replacement root` | Replace an element, rebuilding its ancestors. `[]` replaces the root. |
@@ -371,7 +371,7 @@ Its initial representation deliberately differs:
 | --- | --- |
 | Compact reference-counted allocations | Ordinary Haskell values managed by the garbage collector |
 | Raw integer syntax tags | A caller-defined type parameter |
-| Fixed-width byte lengths and cached child offsets | Unbounded byte lengths; cursors cache focus offsets while green children have no offset cache |
+| Fixed-width byte lengths and cached child offsets | `Int` byte lengths; cursors cache focus offsets while green children have no offset cache |
 | Leading/trailing trivia APIs | Trivia supplied as ordinary token children |
 | Separate node/token cursors with reference counting | One immutable element zipper; persistent replacement by focus or path |
 | Mutable builder with positional checkpoints | Pure persistent builder with the same positional wrapping and structured errors |

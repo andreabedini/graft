@@ -17,13 +17,11 @@ module Graft.Builder
 
 import Data.Text (Text)
 import Graft.Green
-import Numeric.Natural (Natural)
 
 -- | A pending forest in reverse source order, its cached element count, and
 -- a stack of open node kinds and starting positions. Constructors are hidden.
 -- Keeping old builder values permits independent branches without mutation.
-data GreenNodeBuilder kind = Builder
-  !Natural [GreenElement kind] [(kind, Natural)]
+data GreenNodeBuilder kind = Builder !Int [GreenElement kind] [(kind, Int)]
   deriving (Eq, Show)
 
 -- | A position in the pending forest, counting nodes and tokens, not bytes.
@@ -31,7 +29,7 @@ data GreenNodeBuilder kind = Builder
 -- it records neither builder provenance nor historical validity. Use it with
 -- the corresponding construction history. Closing nodes collapses positions;
 -- later emission can make an old position numerically valid again.
-newtype Checkpoint = Checkpoint Natural
+newtype Checkpoint = Checkpoint Int
   deriving (Eq, Show)
 
 -- | Construction failures. Failed operations leave the supplied builder
@@ -39,12 +37,12 @@ newtype Checkpoint = Checkpoint Natural
 -- by current pending count or the current node's starting position.
 data BuilderError
   = NoOpenNode
-  | UnclosedNodes Natural
+  | UnclosedNodes Int
   | EmptyBuilder
-  | MultipleRoots Natural
+  | MultipleRoots Int
   | TokenRoot
-  | CheckpointOutOfBounds Natural Natural
-  | CheckpointBeforeCurrentNode Natural Natural
+  | CheckpointOutOfBounds Int Int
+  | CheckpointBeforeCurrentNode Int Int
   deriving (Eq, Show)
 
 -- | Empty builder with no open nodes or emitted elements.
@@ -77,7 +75,7 @@ builderElement element (Builder count pending parents) =
 finishNode :: GreenNodeBuilder kind -> Either BuilderError (GreenNodeBuilder kind)
 finishNode (Builder _ _ []) = Left NoOpenNode
 finishNode (Builder count pending ((kind, start) : parents)) =
-  let (reversedChildren, before) = splitPending (count - start) pending
+  let (reversedChildren, before) = splitAt (count - start) pending
       node = greenNode kind (reverse reversedChildren)
   in Right (Builder (start + 1) (Node node : before) parents)
 
@@ -105,16 +103,9 @@ startNodeAt (Checkpoint position) kind (Builder count pending parents)
 -- Checking balance takes time proportional to the number of open nodes.
 finishBuilder :: GreenNodeBuilder kind -> Either BuilderError (GreenNode kind)
 finishBuilder (Builder count pending parents) = case parents of
-  _ : _ -> Left (UnclosedNodes (fromIntegral (length parents)))
+  _ : _ -> Left (UnclosedNodes (length parents))
   [] -> case pending of
     [] -> Left EmptyBuilder
     [Node node] -> Right node
     [Token _] -> Left TokenRoot
     _ -> Left (MultipleRoots count)
-
-splitPending :: Natural -> [a] -> ([a], [a])
-splitPending 0 values = ([], values)
-splitPending _ [] = ([], []) -- Unreachable for values made by the public API.
-splitPending count (value : values) =
-  let (prefix, suffix) = splitPending (count - 1) values
-  in (value : prefix, suffix)

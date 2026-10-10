@@ -131,9 +131,9 @@ propCheckpointBounds = forAll (chooseInt (2, 30)) $ \count ->
   in case finishNode pending of
     Left err -> counterexample (show err) False
     Right collapsed -> conjoin
-      [ startNodeAt marker 8 collapsed === Left (CheckpointOutOfBounds (fromIntegral count) 1)
+      [ startNodeAt marker 8 collapsed === Left (CheckpointOutOfBounds count 1)
       , startNodeAt (checkpoint newBuilder) 8 (startNode 9 prefix)
-          === Left (CheckpointBeforeCurrentNode 0 (fromIntegral count))
+          === Left (CheckpointBeforeCurrentNode 0 count)
       , matches (Branch 9 (replicate count (Leaf 1 "x"))) (finishBuilder collapsed)
       ]
 
@@ -143,7 +143,7 @@ propBalance = forAll (chooseInt (1, 30)) $ \depth ->
       -- At each step an open node must be reported, even if the forest already
       -- contains one completed node. Finishing cannot implicitly close it.
       check remaining builder = conjoin
-        [ finishBuilder builder === Left (UnclosedNodes (fromIntegral remaining))
+        [ finishBuilder builder === Left (UnclosedNodes remaining)
         , case finishNode builder of
             Left err -> counterexample (show err) False
             Right closed
@@ -194,7 +194,7 @@ regressions = once $ conjoin
       emptyNode <- finishNode opened
       startNodeAt (checkpoint newBuilder) 7 emptyNode >>= finishNode >>= finishBuilder)
   , conjoin
-      [ nodeTextLength hugeRoot === 2 ^ (70 :: Int)
+      [ nodeTextLength hugeRoot === 2 ^ (40 :: Int)
       , nodeKind hugeRoot === 9
       , length (nodeChildren hugeRoot) === 1
       ]
@@ -205,7 +205,7 @@ regressions = once $ conjoin
     -- Reuse cached huge lengths without rendering or comparing the shared DAG.
     huge :: GreenElement Int
     huge = iterate (\element -> Node (greenNode 8 [element, element]))
-      (Token (greenToken 1 "x")) !! 70
+      (Token (greenToken 1 "x")) !! 40
     hugeRoot = case finishNode (builderElement huge (startNode 9 newBuilder)) >>= finishBuilder of
       Right node -> node
       Left err -> error (show err)

@@ -195,9 +195,9 @@ regressions = once $ conjoin
   , matchNode (error "token must not check node predicate") (const ()) (newCursor (tok "x")) === Nothing
   , matchToken (error "node must not check token predicate") (const ()) emptyGroup === Nothing
   , fmap (cursorRange . nodeSyntax) (castNode hugeRoot :: Maybe GroupView)
-      === Just (rangeFromLength 0 (2 ^ (70 :: Int)))
+      === Just (rangeFromLength 0 (2 ^ (40 :: Int)))
   , fmap (cursorRange . nodeSyntax) (astChild hugeRoot :: Maybe GroupView)
-      === Just (rangeFromLength 0 (2 ^ (69 :: Int)))
+      === Just (rangeFromLength 0 (2 ^ (39 :: Int)))
   ]
   where
     tok = Token . greenToken Name
@@ -206,7 +206,7 @@ regressions = once $ conjoin
     sharedRoot = newCursor (Node (greenNode Root [shared, shared]))
     lazyRoot = newCursor (Node (greenNode Root
       [ Node (greenNode Group []), Node (greenNode Comment []), tok "x", Token (greenToken Space " ") ]))
-    hugeRoot = newCursor (iterate (\element -> Node (greenNode Group [element, element])) (tok "x") !! 70)
+    hugeRoot = newCursor (iterate (\element -> Node (greenNode Group [element, element])) (tok "x") !! 40)
 
 astProperties :: [(String, Property)]
 astProperties =

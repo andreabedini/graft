@@ -29,11 +29,13 @@ import Data.Text (Text)
 import qualified Data.Text.Encoding as Encoding
 import qualified Data.Text.Lazy as Lazy
 import qualified Data.Text.Lazy.Builder as Builder
-import Numeric.Natural (Natural)
 
--- | A non-negative, unbounded count of UTF-8 bytes, including all trivia.
--- This is neither a character count nor a UTF-16 code-unit count.
-type TextLength = Natural
+-- | A non-negative count of UTF-8 bytes, including all trivia, in the same
+-- 'Int' unit that "Data.Text" and "Data.ByteString" use for lengths. This is
+-- neither a character count nor a UTF-16 code-unit count. Shared subtrees make
+-- a logical length exceed the physical text size; sums are not checked for
+-- overflow, which needs a logical length beyond @maxBound :: Int@.
+type TextLength = Int
 
 -- | An internal node with ordered children and a cached total text length.
 -- Equality is structural, including kinds, rather than pointer identity.
@@ -62,7 +64,7 @@ greenNode kind children =
 -- time and temporary space proportional to its UTF-8 size.
 greenToken :: kind -> Text -> GreenToken kind
 greenToken kind text =
-  GreenToken kind (fromIntegral (BS.length (Encoding.encodeUtf8 text))) text
+  GreenToken kind (BS.length (Encoding.encodeUtf8 text)) text
 
 -- | The caller-defined kind of a node.
 nodeKind :: GreenNode kind -> kind

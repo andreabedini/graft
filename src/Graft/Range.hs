@@ -1,5 +1,5 @@
--- | Validated half-open UTF-8 byte ranges. Offsets share the unbounded
--- 'TextLength' unit used by green-tree caches.
+-- | Validated half-open UTF-8 byte ranges. Offsets share the 'TextLength'
+-- unit used by green-tree caches.
 module Graft.Range
   ( TextRange
   , textRange
@@ -25,8 +25,8 @@ textRange start end
   | start <= end = Just (TextRange start end)
   | otherwise = Nothing
 
--- | Construct a range from start and byte length. Unbounded arithmetic means
--- that the endpoint cannot overflow.
+-- | Construct a range from start and byte length. The length must not be
+-- negative; cached green lengths never are, and the sum is not checked.
 rangeFromLength :: TextLength -> TextLength -> TextRange
 rangeFromLength start len = TextRange start (start + len)
 

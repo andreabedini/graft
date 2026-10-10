@@ -16,8 +16,8 @@ and tokens are valid; repeated references to the same subtree are valid too.
 
 Green values contain no parents or absolute positions. `GreenNode` and
 `GreenToken` have hidden constructors; smart constructors establish the length
-invariants. `TextLength` is an alias for `Natural`, a non-negative unbounded
-integer. Reading a cache never walks the children or token text. Construction
+invariants. `TextLength` is an alias for `Int`, the length unit of `text` and
+`bytestring`. Reading a cache never walks the children or token text. Construction
 requires finite, acyclic input, as ordinary Haskell recursion can otherwise
 define non-terminating values.
 
@@ -32,9 +32,10 @@ Rowan uses compact reference-counted allocations, integer syntax tags,
 fixed-width lengths, and child offsets. Graft starts with ordinary algebraic
 data types and child lists, relying on Haskell's garbage collector and value
 reuse. Parameterized kinds allow application enums without a conversion layer.
-Unbounded byte counts prevent overflow even when a small shared graph has an
-enormous logical text size. This does not mean that enormous text can be rendered:
-the result must still fit in a strict `Text`.
+Byte counts are machine integers, as in `text` and `bytestring`. A small shared
+graph can still have a logical text size far beyond anything that can be
+rendered, since the result must fit in a strict `Text`; the cached sum itself
+is not checked and would need a logical size beyond `maxBound :: Int` to overflow.
 
 Whitespace and comments are ordinary child tokens initially. Rowan's current
 leading/trailing trivia representation is not ported yet. This choice preserves

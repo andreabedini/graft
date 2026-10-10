@@ -230,12 +230,10 @@ propCursorReplacement model replacement =
                       rangeFromLength expectedStart (byteLength (source subtree)))
                 | (other, otherPrefix, subtree, _) <- contexts model
                 , not (path `isPrefixOf` other || other `isPrefixOf` path)
-                -- Use Integer for the signed shift, then convert the validated
-                -- non-negative new offset back to the range's Natural unit.
                 , let shift = if other > path
-                        then toInteger (byteLength (source replacement)) - toInteger (byteLength (source selected))
+                        then byteLength (source replacement) - byteLength (source selected)
                         else 0
-                , let expectedStart = fromInteger (toInteger (byteLength otherPrefix) + shift)
+                , let expectedStart = byteLength otherPrefix + shift
                 ]
             ]
 
@@ -353,10 +351,9 @@ cursorRegressions = once $ conjoin
   , cursorGreen sharedSecond === shared
   , renderElement (replaceFocus (tok "long") sharedSecond) === "along"
   , cursorRange sharedSecond === rangeFromLength 1 1
-  , rangeEnd (cursorRange hugeCursor) === 2 ^ (70 :: Int)
-  , offsetPaths (tokenAtOffset (2 ^ (70 :: Int)) hugeCursor)
-      === SingleToken (replicate 70 1)
-  , rangeEnd (rangeFromLength (2 ^ (70 :: Int)) (2 ^ (70 :: Int))) === 2 ^ (71 :: Int)
+  , rangeEnd (cursorRange hugeCursor) === 2 ^ (40 :: Int)
+  , offsetPaths (tokenAtOffset (2 ^ (40 :: Int)) hugeCursor)
+      === SingleToken (replicate 40 1)
   ]
   where
     tok = Token . greenToken Name
@@ -378,7 +375,7 @@ cursorRegressions = once $ conjoin
     sharedSecond = case childAt 1 (newCursor (Node (greenNode Root [shared, shared]))) of
       Right cursor -> cursor
       Left err -> error (show err)
-    hugeCursor = newCursor (iterate (\child -> Node (greenNode Group [child, child])) (tok "x") !! 70)
+    hugeCursor = newCursor (iterate (\child -> Node (greenNode Group [child, child])) (tok "x") !! 40)
 
 regressions :: Property
 regressions = once $ conjoin
@@ -388,7 +385,7 @@ regressions = once $ conjoin
   , nodeTextLength original === 22
   , fmap renderNode (replaceChild 0 (tok "y") original)
       === Right "y\t{- keep -}\r\n😀e\x0301\0"
-  , elementTextLength huge === 2 ^ (70 :: Int)
+  , elementTextLength huge === 2 ^ (40 :: Int)
   , nodeKind original === Root
   , elementKind (tok "x") === Name
   , fmap renderElement (replaceAt [] (tok "new") (Node original)) === Right "new"
@@ -404,7 +401,7 @@ regressions = once $ conjoin
       , Node (greenNode Group [tok "\r\n", tok "😀e\x0301\0", tok ""])
       ]
     -- A tiny shared DAG with a logical size above Word64. Never render it.
-    huge = iterate (\child -> Node (greenNode Group [child, child])) (tok "x") !! 70
+    huge = iterate (\child -> Node (greenNode Group [child, child])) (tok "x") !! 40
 
 main :: IO ()
 main = do
