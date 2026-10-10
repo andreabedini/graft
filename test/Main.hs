@@ -6,7 +6,7 @@ import Control.Monad (unless)
 import Data.Char (chr, ord)
 import Data.List (isPrefixOf)
 import qualified Data.Text as Text
-import Graft
+import Graft hiding (children)
 import System.Exit (exitFailure)
 import Test.QuickCheck
 
