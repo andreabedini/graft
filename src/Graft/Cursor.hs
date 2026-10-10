@@ -28,11 +28,15 @@ module Graft.Cursor
   , tokenAtOffset
   , coveringElement
   , replaceFocus
+  , spliceChildrenFocus
+  , insertChildFocus
+  , removeChildFocus
   ) where
 
 import Control.Applicative ((<|>))
 import Data.List (find)
-import Graft.Edit (Path, PathError (..))
+import Graft.Edit (ChildEditError (..), Path, PathError (..))
+import qualified Graft.Edit as Edit
 import Graft.Green
 import Graft.Range
 
@@ -227,6 +231,39 @@ replaceFocus replacement (Cursor _ _ context) = rebuild replacement context
     rebuild edited Nothing = edited
     rebuild edited (Just (Crumb node _ above _ before after)) =
       rebuild (Node (greenNode (nodeKind node) (reverse before ++ edited : after))) above
+
+-- | Splice immediate children of a focused node and return a new green root.
+-- Bounds and sharing follow 'Edit.spliceChildren'. A token focus returns
+-- 'CannotEditTokenChildren' before checking boundaries. The cursor retains its
+-- original snapshot; start a new cursor on the result to observe shifted paths
+-- and byte ranges. No punctuation, whitespace or comments are inserted implicitly.
+spliceChildrenFocus
+  :: Int -> Int -> [GreenElement kind] -> Cursor kind
+  -> Either ChildEditError (GreenElement kind)
+spliceChildrenFocus start end replacements =
+  editChildrenFocus (Edit.spliceChildren start end replacements)
+
+-- | Insert one child into a focused node. Its child count appends. Returns a
+-- new root with the same snapshot and validation rules as 'spliceChildrenFocus'.
+insertChildFocus
+  :: Int -> GreenElement kind -> Cursor kind
+  -> Either ChildEditError (GreenElement kind)
+insertChildFocus index element = editChildrenFocus (Edit.insertChild index element)
+
+-- | Remove an existing child of a focused node, returning a new root. Removing
+-- the last child leaves an empty node. Follows 'spliceChildrenFocus' snapshot
+-- rules; the child count is out of bounds for removal.
+removeChildFocus :: Int -> Cursor kind -> Either ChildEditError (GreenElement kind)
+removeChildFocus index = editChildrenFocus (Edit.removeChild index)
+
+editChildrenFocus
+  :: (GreenNode kind -> Either ChildEditError (GreenNode kind))
+  -> Cursor kind -> Either ChildEditError (GreenElement kind)
+editChildrenFocus edit cursor = case cursorGreen cursor of
+  Token _ -> Left CannotEditTokenChildren
+  Node node -> do
+    edited <- edit node
+    pure (replaceFocus (Node edited) cursor)
 
 unfold :: (a -> Maybe a) -> Maybe a -> [a]
 unfold _ Nothing = []

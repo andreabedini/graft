@@ -5,8 +5,16 @@ module Graft.Edit
   , elementAt
   , replaceAt
   , replaceChild
+  , ChildEditError (..)
+  , spliceChildren
+  , insertChild
+  , removeChild
+  , spliceChildrenAt
+  , insertChildAt
+  , removeChildAt
   ) where
 
+import Data.Bifunctor (first)
 import Graft.Green
 
 -- | Zero-based child indices, counting both nodes and tokens. The empty path
@@ -59,6 +67,102 @@ replaceAt (index : rest) replacement root
 -- Uses the same validation and sharing rules as 'replaceAt'.
 replaceChild :: Int -> GreenElement kind -> GreenNode kind -> Either PathError (GreenNode kind)
 replaceChild index replacement = modifyChild index (const (Right replacement))
+
+-- | Invalid child editing. Path failures retain the original 'PathError'.
+-- 'CannotEditTokenChildren' means that the selected target is a token.
+-- Boundary errors carry the offending position; a reversed range carries
+-- start and end. Positions count nodes and tokens, including empty elements.
+data ChildEditError
+  = ChildEditPathError PathError
+  | CannotEditTokenChildren
+  | NegativeChildBoundary Int
+  | ReversedChildRange Int Int
+  | ChildBoundaryOutOfBounds Int
+  deriving (Eq, Show)
+
+-- | @spliceChildren start end replacements node@ replaces the half-open child
+-- range @[start,end)@. Both boundaries must lie between zero and the child
+-- count, inclusive. Equal boundaries insert; an empty replacement deletes.
+-- The node's kind is retained. No text, separators or trivia are synthesized.
+--
+-- Validation checks negative start, negative end, reversed range, start bounds,
+-- then end bounds, in that order. Invalid input returns no partial result.
+-- Untouched elements and the following list suffix are reused. Cost is a
+-- traversal of immediate children and replacements to establish the new cache;
+-- descendant text is not traversed. Inputs must be finite, as for 'greenNode'.
+spliceChildren
+  :: Int -> Int -> [GreenElement kind] -> GreenNode kind
+  -> Either ChildEditError (GreenNode kind)
+spliceChildren start end replacements node
+  | start < 0 = Left (NegativeChildBoundary start)
+  | end < 0 = Left (NegativeChildBoundary end)
+  | end < start = Left (ReversedChildRange start end)
+  | otherwise = greenNode (nodeKind node) <$> go start (nodeChildren node)
+  where
+    go 0 items = (replacements ++) <$> dropSelected (end - start) items
+    go _ [] = Left (ChildBoundaryOutOfBounds start)
+    go remaining (item : items) = (item :) <$> go (remaining - 1) items
+    dropSelected 0 items = Right items
+    dropSelected _ [] = Left (ChildBoundaryOutOfBounds end)
+    dropSelected remaining (_ : items) = dropSelected (remaining - 1) items
+
+-- | Insert one immediate child before the given index. The child count is a
+-- valid position and appends; zero inserts into an empty node. Uses the same
+-- validation, sharing and cache rules as 'spliceChildren'.
+insertChild
+  :: Int -> GreenElement kind -> GreenNode kind
+  -> Either ChildEditError (GreenNode kind)
+insertChild index element = spliceChildren index index [element]
+
+-- | Remove one existing immediate child. Unlike insertion, the child count
+-- is out of bounds. Negative indices return 'NegativeChildBoundary'; a missing
+-- child returns 'ChildBoundaryOutOfBounds'. Validation never adds one to the
+-- index, so even @maxBound :: Int@ cannot overflow. Retains the node's kind
+-- and follows the same sharing and cache rules as 'spliceChildren'.
+removeChild :: Int -> GreenNode kind -> Either ChildEditError (GreenNode kind)
+removeChild index node
+  | index < 0 = Left (NegativeChildBoundary index)
+  | otherwise = greenNode (nodeKind node) <$> go index (nodeChildren node)
+  where
+    go _ [] = Left (ChildBoundaryOutOfBounds index)
+    go 0 (_ : items) = Right items
+    go remaining (item : items) = (item :) <$> go (remaining - 1) items
+
+-- | Splice the children of the node selected by a root-relative path and
+-- return a new root. An empty path selects the root node. Path validation
+-- precedes target validation (a token has no editable children), which precedes
+-- boundary validation. Successful edits rebuild ancestors using 'replaceAt'.
+-- Paths and byte offsets after the edited range can change in the new snapshot.
+spliceChildrenAt
+  :: Path -> Int -> Int -> [GreenElement kind] -> GreenElement kind
+  -> Either ChildEditError (GreenElement kind)
+spliceChildrenAt path start end replacements =
+  editNodeAt path (spliceChildren start end replacements)
+
+-- | Insert a child into the path-selected node. The index is relative to that
+-- node; its child count appends. Validation and persistence match 'spliceChildrenAt'.
+insertChildAt
+  :: Path -> Int -> GreenElement kind -> GreenElement kind
+  -> Either ChildEditError (GreenElement kind)
+insertChildAt path index element = editNodeAt path (insertChild index element)
+
+-- | Remove an existing child of the path-selected node. Validation and
+-- persistence match 'spliceChildrenAt'; the node itself is retained, even
+-- after removing its last child.
+removeChildAt
+  :: Path -> Int -> GreenElement kind -> Either ChildEditError (GreenElement kind)
+removeChildAt path index = editNodeAt path (removeChild index)
+
+editNodeAt
+  :: Path -> (GreenNode kind -> Either ChildEditError (GreenNode kind))
+  -> GreenElement kind -> Either ChildEditError (GreenElement kind)
+editNodeAt path edit root = do
+  target <- first ChildEditPathError (elementAt path root)
+  case target of
+    Token _ -> Left CannotEditTokenChildren
+    Node node -> do
+      edited <- edit node
+      first ChildEditPathError (replaceAt path (Node edited) root)
 
 modifyChild
   :: Int
