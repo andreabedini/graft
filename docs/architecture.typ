@@ -1,9 +1,9 @@
-#set document(title: "Graft: green tree architecture", author: "Andrea Bedini")
+#set document(title: "Graft: concrete syntax architecture", author: "Andrea Bedini")
 #set page(paper: "a4", numbering: "1")
 #set text(font: "Libertinus Serif", size: 11pt)
 #set heading(numbering: "1.")
 
-= Graft: green tree architecture
+= Graft: concrete syntax architecture
 
 Graft provides concrete syntax infrastructure for bidirectional parsing,
 printing, and semantic updates that preserve untouched text. A concrete syntax
@@ -70,6 +70,49 @@ cannot eliminate repeated source occurrences. Deep recursion may exhaust the
 stack. No performance or memory advantage over Rowan is claimed without
 benchmarks.
 
+== Red cursors and source ranges
+
+The second milestone adds an immutable red cursor: a zipper focusing a node or
+token occurrence with its context. `Cursor kind` contains a green focus, its
+absolute byte offset, and parent breadcrumbs. Each breadcrumb retains the
+original parent node and offset, its context, the child's index, preceding
+siblings in reverse order, and following siblings. This is an ordinary algebraic
+data type with no unsafe code, mutable references, or separate allocation layer.
+
+`newCursor` starts at offset zero. Child navigation computes offsets from cached
+sibling lengths. Parent and adjacent sibling moves restore context in constant
+time; child indexing and last-child navigation scan lists. `cursorPath` and
+`cursorRoot` walk the ancestor chain. Traversals are lazy and visit shared green
+values once per occurrence. Token navigation includes empty tokens and skips
+tokenless nodes; moving to the next or previous token from a node crosses the
+entire focused subtree.
+
+A cursor belongs to its original snapshot. `replaceFocus` rebuilds ancestors
+and returns a new green root, preserving the old cursor and snapshot. Navigating
+the result requires a new cursor; later offsets may have changed. A live cursor
+retains its original ancestors and therefore the original green root. Cursors
+do not expose pointer identity or occurrence equality. Paths distinguish repeated
+green values only within a known snapshot.
+
+`TextRange` is an abstract half-open UTF-8 byte interval with validated endpoints.
+`textRange` takes start and end, rejecting a reversed interval;
+`rangeFromLength` takes start and length. Byte offsets may lie inside multibyte
+characters. Ordinary point containment excludes the end, while range containment
+accepts an empty query at either endpoint.
+
+Offset lookup uses closed endpoint contact: `tokenAtOffset` returns a single
+nonempty token in its interior, both neighbors at a shared boundary, or no token
+outside the focus. Empty tokens remain navigable but do not participate in offset
+lookup. The end of file (EOF) selects the last nonempty token. Cached ranges prune unrelated
+subtrees, so lookup need not render or enumerate the whole tree.
+
+`coveringElement` repeatedly descends into the first child whose range contains
+the query. At ambiguous empty ranges, this deterministic choice favors the first
+covering child in source order, including empty elements. It returns the
+innermost element on that branch, not a globally deepest candidate. Out-of-focus
+queries return no element. These boundary rules are part of Graft's contract;
+they do not promise Rowan's exact tie-breaking behavior.
+
 == Evidence and upstream study
 
 The first milestone tests rendering and byte counts against an independent model
@@ -78,6 +121,14 @@ unaffected branches. Generated text includes Unicode scalar values, combining
 characters, CRLF, and NUL. Coverage checks exercise nested edits and node/token
 targets and replacements. Regressions cover empty values and a shared graph
 whose logical length exceeds a machine word.
+
+Cursor properties compare every occurrence and range with the independent model,
+check parent/sibling round trips and token ordering, and verify unaffected ranges
+after replacements grow or shrink. Scoped offset lookup and covering queries are
+checked against model positions. Explicit cases cover tokenless nodes, empty
+tokens, multibyte interiors, shared-boundary ambiguity, EOF, repeated shared
+subtrees at distinct offsets, and lookup in a shared graph beyond machine-word
+length without rendering it.
 
 The implementation study used Rowan revision
 `b6f1cb6494a99a2264186d110b1b170989774814`, retrieved on 10 October 2026;
@@ -99,9 +150,8 @@ its manifest identifies version 0.17.0. The inspected sources were:
 
 == Remaining work
 
-- Red zippers: contextual parent/sibling navigation, traversals, UTF-8 source
-  ranges, and well-defined behavior at empty elements and token boundaries.
-- Rowan-style builders and checkpoints with validation of balanced construction.
+- The next milestone: Rowan-style builders and checkpoints with validation of
+  balanced construction.
 - Persistent child insertion, removal, and splicing.
 - Typed AST views that keep access to the concrete tokens and trivia.
 - Explicit trivia ownership and the desired Rowan compatibility boundary.

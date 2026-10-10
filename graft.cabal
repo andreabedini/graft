@@ -5,7 +5,8 @@ synopsis:        Immutable, lossless concrete syntax trees
 description:
     A small, idiomatic Haskell port of Rowan's concrete syntax infrastructure.
     Green trees preserve token text, cache UTF-8 byte lengths, and support
-    structural sharing. Lexing and parsing are left to callers.
+    structural sharing. Immutable red cursors provide navigation, source ranges,
+    and persistent editing. Lexing and parsing are left to callers.
 category:        Language
 license:         MIT
 license-file:    LICENSE
