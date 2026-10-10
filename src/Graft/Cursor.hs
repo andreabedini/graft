@@ -244,7 +244,7 @@ spliceChildrenFocus start end replacements =
   editChildrenFocus (Edit.spliceChildren start end replacements)
 
 -- | Insert one child into a focused node. Its child count appends. Returns a
--- new root with the same snapshot and validation rules as 'spliceChildrenFocus'.
+-- new root with the same validation and snapshot rules as 'spliceChildrenFocus'.
 insertChildFocus
   :: Int -> GreenElement kind -> Cursor kind
   -> Either ChildEditError (GreenElement kind)

@@ -70,6 +70,43 @@ cannot eliminate repeated source occurrences. Deep recursion may exhaust the
 stack. No performance or memory advantage over Rowan is claimed without
 benchmarks.
 
+== Child insertion, removal, and splicing
+
+The fourth milestone adds `spliceChildren`, which replaces a half-open range
+of immediate children with a list of green elements. Its integer boundaries
+count both nodes and tokens, including empty elements. They range from zero
+through the child count, inclusive. Equal boundaries insert. An empty
+replacement deletes. `insertChild` inserts one element, allowing append at the
+child count. `removeChild` requires an existing child and avoids incrementing
+the supplied index, so extreme indices cannot overflow.
+
+The original parent kind survives, even when all its children are removed.
+Untouched elements and the following list suffix are reused. Construction scans
+immediate child caches to establish the new total length. Descendant text needs
+no traversal. Callers supply all new punctuation and whitespace. Trivia outside
+the selected child range remains untouched. No grammar or formatting repair occurs.
+
+Path variants select a node in a green root, edit its children, and rebuild its
+ancestors. Cursor variants edit the focused node and rebuild through its context.
+Both return a new green root and retain the original snapshot. A token cannot be
+a child-edit target. An empty path selects the root node, and removing all
+children retains that root as an empty node.
+
+`ChildEditError` separates path errors, token targets, and invalid boundaries.
+Path validation precedes token-target validation, which precedes boundary
+validation. Boundaries are checked in this order: negative start, negative end,
+reversed range, start bounds, then end bounds. Errors return no partial edit.
+Rowan accepts generic range bounds for green splicing and first collects the
+children into a vector. Graft uses one explicit half-open convention, rebuilds
+list prefixes, and retains the following suffix. Path and focus helpers connect
+this node edit to persistent root reconstruction.
+
+Edits can shift paths as well as byte ranges. Empty inserted elements shift
+indices without adding text. Removed occurrences have no counterpart in the
+new snapshot. Applications must reconsider paths after editing and start a new
+cursor to observe the result. This milestone supplies individual structural
+edits without occurrence tracking or a batch-edit protocol across versions.
+
 == Red cursors and source ranges
 
 The second milestone adds an immutable red cursor: a zipper focusing a node or
@@ -178,6 +215,14 @@ bounds, and balance at every close. Regressions cover invalid root shapes,
 empty construction, top-level wrapping, markers from unrelated builders, revived
 positions, and reuse of large shared trees without rendering them.
 
+Child-edit properties share the green and cursor tests' independent model.
+They compare shape, exact source, all caches, and every new occurrence range.
+Untouched occurrences are checked at their shifted paths. Properties also cover
+direct/path/focus agreement, insertion/removal inverses, empty and identity
+splices, validation order, invalid paths, and token targets. Regressions cover
+empty elements, retained trivia, Unicode, extreme indices, and large cached
+lengths without rendering shared trees.
+
 The implementation study used Rowan revision
 `b6f1cb6494a99a2264186d110b1b170989774814`, retrieved on 10 October 2026;
 its manifest identifies version 0.17.0. The inspected sources were:
@@ -185,7 +230,7 @@ its manifest identifies version 0.17.0. The inspected sources were:
 #let upstream = "https://github.com/rust-analyzer/rowan/blob/b6f1cb6494a99a2264186d110b1b170989774814/"
 - #link(upstream + "src/green/node.rs")[Green nodes] and
   #link(upstream + "src/green/token.rs")[tokens]: lengths, child storage,
-  rendering, and trivia.
+  rendering, trivia, and green child insertion/removal/splicing.
 - #link(upstream + "src/cursor.rs")[Cursors]: contextual navigation and
   replacement through ancestors.
 - #link(upstream + "src/green/builder.rs")[Builders] and
@@ -199,8 +244,7 @@ its manifest identifies version 0.17.0. The inspected sources were:
 
 == Remaining work
 
-- The next milestone: persistent child insertion, removal, and splicing.
-- Typed AST views that keep access to the concrete tokens and trivia.
+- The next milestone: typed AST views that keep access to concrete tokens and trivia.
 - Explicit trivia ownership and the desired Rowan compatibility boundary.
 - Benchmarks of wide/deep trees, repeated edits, rendering, and memory residency
   before choosing interning, vectors, additional offset caches, or other layouts.

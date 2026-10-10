@@ -18,3 +18,7 @@
   green elements, and positional checkpoints for retroactive wrapping.
 * Structured errors for unbalanced construction, invalid roots, and checkpoint
   bounds, with model properties and checkpoint lifetime regressions.
+* Persistent half-open child splicing, insertion, and removal on green nodes,
+  path-selected nodes, and cursor focuses, with structured child-edit errors.
+* Shared-model properties for unchanged occurrences, shifted paths and byte
+  ranges, identity edits, inverse edits, and child-edit validation order.

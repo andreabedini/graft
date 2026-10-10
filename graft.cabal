@@ -6,8 +6,8 @@ description:
     A small, idiomatic Haskell port of Rowan's concrete syntax infrastructure.
     Green trees preserve token text, cache UTF-8 byte lengths, and support
     structural sharing. Immutable red cursors provide navigation, source ranges,
-    and persistent editing. Pure builders support positional checkpoints and
-    reuse of existing subtrees. Lexing and parsing are left to callers.
+    and persistent subtree and child editing. Pure builders support positional
+    checkpoints and reuse of existing subtrees. Lexing and parsing are left to callers.
 category:        Language
 license:         MIT
 license-file:    LICENSE

@@ -1,4 +1,4 @@
--- | Persistent editing and lookup using paths of child indices.
+-- | Persistent element replacement, child splicing and path lookup.
 module Graft.Edit
   ( Path
   , PathError (..)
@@ -19,7 +19,8 @@ import Graft.Green
 
 -- | Zero-based child indices, counting both nodes and tokens. The empty path
 -- denotes the root. Paths belong to a particular tree version; an edit may
--- invalidate paths inside the replaced subtree.
+-- invalidate paths inside the replaced subtree. Child insertion/removal also
+-- shifts paths of following siblings and their descendants.
 type Path = [Int]
 
 -- | Failure at the first invalid step in a path. Indices are relative to

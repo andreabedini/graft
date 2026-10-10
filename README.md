@@ -11,7 +11,9 @@ persistent subtree replacement. The second milestone adds immutable **red
 cursors** (zippers), contextual navigation, UTF-8 source ranges, boundary-aware
 lookup, and replacement through a focus. The third milestone adds pure builders
 with checkpoints for wrapping previously emitted elements. The API is
-experimental. Child splicing, interning, and typed AST views remain future work.
+experimental. The fourth milestone adds child insertion, removal, and splicing
+through green nodes, paths, and cursor focuses. Interning and typed AST views
+remain future work.
 
 ## Build and test
 
@@ -36,6 +38,9 @@ Builder properties compare streamed construction with an independent tree model.
 They cover checkpoint wrapping, later emission, repeated wrapping, saved builder
 branches, subtree reuse, and construction errors. Regressions cover checkpoint
 lifetime, empty values, and reuse of large cached lengths.
+Child-edit properties check exact source, caches, unchanged occurrences, shifted
+paths and ranges, insertion/removal inverses, and validation order. Regressions
+cover extreme indices and empty elements that shift paths without shifting text.
 
 ## Preserve formatting while changing a subtree
 
@@ -226,6 +231,61 @@ also pass the bounds tests. Use markers with their corresponding construction
 history. A marker before an expression can be reused for repeated wrapping,
 such as building a chain of left-associative operators.
 
+## Insert, remove, or splice children
+
+A child splice replaces a range of immediate children with a list of elements.
+`spliceChildren start end replacements node` uses a half-open range `[start,end)`.
+The boundaries count both nodes and tokens, including empty elements. Both
+boundaries can equal the child count. Equal boundaries insert, and an empty
+replacement list deletes the selected children. The parent node keeps its kind.
+
+Using `original` from the first example, append two children to its expression:
+
+```haskell
+extendExpression :: Either ChildEditError (GreenElement Kind)
+extendExpression = spliceChildrenAt [2] 1 1
+  [tok Trivia " + ", tok Number "2"] (Node original)
+```
+
+The result renders as `x  = 1 + 2 -- keep\r\n`. The existing spacing, comment,
+and line ending survive. The original root still renders as `x  = 1 -- keep\r\n`.
+New syntax and its separators come from the supplied token text.
+
+| Operation | Contract |
+| --- | --- |
+| `spliceChildren start end replacements node` | Replace immediate children in `[start,end)` and return a new node. |
+| `insertChild index element node` | Insert before a child. The child count appends, and zero inserts into an empty node. |
+| `removeChild index node` | Remove an existing child. The child count is out of bounds. |
+| `spliceChildrenAt path start end replacements root` | Splice children of the path-selected node and return a new root. `[]` selects the root. |
+| `insertChildAt path index element root`, `removeChildAt path index root` | Insert or remove a child of the path-selected node. |
+| `spliceChildrenFocus start end replacements focus` | Splice children of a node focus and return a new green root. |
+| `insertChildFocus index element focus`, `removeChildFocus index focus` | Insert or remove a child of the focused node. |
+
+The indices are relative to the selected node, even when it lies inside a larger
+tree. Removing all children leaves an empty node. Removing a token retains its
+sibling trivia. Include that trivia in the splice range when it must also go.
+Graft performs no grammar validation or formatting repair.
+
+All child edits return `Either ChildEditError`. Path variants first report
+`ChildEditPathError`, which contains the original `PathError`. Selecting a token
+then reports `CannotEditTokenChildren`, before checking any child boundaries.
+Boundary validation checks negative start, negative end, reversed range, start
+bounds, and end bounds in that order. The errors are `NegativeChildBoundary`,
+`ReversedChildRange`, and `ChildBoundaryOutOfBounds`. They carry the offending
+position, or both positions for a reversed range. Removal checks an existing
+child index without adding one, so `maxBound :: Int` cannot overflow.
+
+Edits reuse untouched green elements and the following child-list suffix.
+Cached lengths are recomputed from immediate children, without reading their
+descendant text. Path and cursor variants rebuild ancestors. The original root
+and cursor retain their original snapshot. Start a new cursor on the returned
+root to observe the edited tree.
+
+Adding or removing children can shift paths as well as source ranges. Inserting
+an empty node shifts later child indices even though no byte offsets change.
+Paths from the old snapshot must be reconsidered after an edit. These operations
+apply one edit to one snapshot, without tracking occurrences across versions.
+
 ## Architecture and remaining work
 
 Graft retains Rowan's separation of immutable syntax from contextual navigation.
@@ -240,6 +300,7 @@ Its initial representation deliberately differs:
 | Separate node/token cursors with reference counting | One immutable element zipper; persistent replacement by focus or path |
 | Mutable builder with positional checkpoints | Pure persistent builder with the same positional wrapping and structured errors |
 | Builder cache for deduplication | Explicit value reuse; no interning |
+| Generic range bounds for green child splicing | Validated half-open child indices with node/path/focus entry points |
 
 The [architecture note](docs/architecture.typ) explains the decisions, costs,
 upstream sources reviewed, and next steps. Build its PDF with Typst:
@@ -248,9 +309,9 @@ upstream sources reviewed, and next steps. Build its PDF with Typst:
 typst compile docs/architecture.typ docs/architecture.pdf
 ```
 
-The next milestone is persistent child insertion, removal, and splicing.
-Later work includes typed AST views that retain concrete syntax, and benchmarks
-before selecting an interner or changing the representation. Attached trivia and compatibility with
+The next milestone is typed AST views that retain access to concrete syntax.
+Later work includes benchmarks before selecting an interner or changing the
+representation. Attached trivia and compatibility with
 Rowan's current API require further design. Semantic update policy remains a
 layer above the concrete tree.
 
