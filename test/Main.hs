@@ -4,9 +4,10 @@ module Main (main) where
 
 import Control.Monad (unless)
 import Data.Char (chr, ord)
-import Data.List (isPrefixOf)
+import Data.List (find, isPrefixOf)
 import qualified Data.Text as Text
 import Graft hiding (children)
+import qualified Graft.Cursor as Cursor
 import System.Exit (exitFailure)
 import Test.QuickCheck
 
@@ -151,9 +152,6 @@ propReplacement model new =
             , not (path `isPrefixOf` other || other `isPrefixOf` path)
             ]
         ]
-  where
-    isLeaf (Leaf _ _) = True
-    isLeaf _ = False
 
 propIdentity :: Model -> Property
 propIdentity model = forAll (elements (contexts model)) $ \(path, _, selected, _) ->
@@ -185,6 +183,278 @@ propChildReplacement children new =
             | otherwise = Right (compile (Branch Root
                 (take i children ++ [new] ++ drop (i + 1) children)))
       in (Node <$> replaceChild i (compile new) node) === expected
+
+-- Cursor descriptions deliberately compare an occurrence's path and range as
+-- well as its green value, so equal shared subtrees cannot be confused.
+describe :: Cursor Kind -> (Path, GreenElement Kind, TextRange)
+describe cursor = (cursorPath cursor, cursorGreen cursor, cursorRange cursor)
+
+modelOccurrences :: Model -> [(Path, GreenElement Kind, TextRange)]
+modelOccurrences model =
+  [ (path, compile selected, rangeFromLength (byteLength prefix) (byteLength (source selected)))
+  | (path, prefix, selected, _) <- contexts model
+  ]
+
+isLeaf :: Model -> Bool
+isLeaf (Leaf _ _) = True
+isLeaf _ = False
+
+propCursorOccurrences :: Model -> Property
+propCursorOccurrences model =
+  let cursor = newCursor (compile model)
+      expected = modelOccurrences model
+      leafPaths = [path | (path, _, selected, _) <- contexts model, isLeaf selected]
+  in conjoin
+      [ map describe (descendants cursor) === expected
+      , map cursorPath (tokens cursor) === leafPaths
+      , conjoin
+          [ fmap describe (cursorAt path cursor) === Right occurrence
+          | occurrence@(path, _, _) <- expected
+          ]
+      ]
+
+propCursorNavigation :: Model -> Property
+propCursorNavigation model = forAll (elements (contexts model)) $ \(path, _, selected, _) ->
+  checkCoverage $
+  cover 10 (null path) "root" $
+  cover 10 (not (null path)) "non-root" $
+  cover 5 (length path > 1) "nested" $
+  cover 5 (null (source selected)) "empty focus" $
+  case cursorAt path rootCursor of
+    Left err -> counterexample (show err) False
+    Right focus ->
+      let expectedChildren =
+            [ occurrence
+            | occurrence@(other, _, _) <- modelOccurrences model
+            , length other == length path + 1, path `isPrefixOf` other
+            ]
+          expectedParent = case reverse path of
+            [] -> Nothing
+            _ : rest -> find (\(other, _, _) -> other == reverse rest) (modelOccurrences model)
+          expectedSibling delta = case reverse path of
+            [] -> Nothing
+            index : rest -> find (\(other, _, _) -> other == reverse rest ++ [index + delta])
+              (modelOccurrences model)
+          maybeFirst [] = Nothing
+          maybeFirst (value : _) = Just value
+      in conjoin
+          [ describe (cursorRoot focus) === describe rootCursor
+          , map cursorPath (ancestors focus) === [take n path | n <- reverse [0 .. length path]]
+          , fmap describe (parent focus) === expectedParent
+          , map describe (Cursor.children focus) === expectedChildren
+          , fmap describe (firstChild focus) === maybeFirst expectedChildren
+          , fmap describe (lastChild focus) === maybeFirst (reverse expectedChildren)
+          , fmap describe (nextSibling focus) === expectedSibling 1
+          , fmap describe (previousSibling focus) === expectedSibling (-1)
+          , fmap describe (nextSibling focus >>= previousSibling)
+              === (describe focus <$ nextSibling focus)
+          , fmap describe (previousSibling focus >>= nextSibling)
+              === (describe focus <$ previousSibling focus)
+          , case selected of
+              Leaf _ _ -> fmap cursorGreen (childAt 0 focus) === Left CannotDescendIntoToken
+              Branch _ kids -> conjoin
+                [ fmap describe (childAt i focus) === Right occurrence
+                | (i, occurrence) <- zip [0 .. length kids - 1] expectedChildren
+                ]
+          , fmap cursorGreen (childAt (-1) focus) === Left (NegativeChildIndex (-1))
+          , conjoin
+              [ fmap cursorGreen (cursorAt relative focus)
+                  === elementAt relative (compile selected)
+              | (relative, _, _, _) <- contexts selected
+              ]
+          ]
+  where
+    rootCursor = newCursor (compile model)
+
+propCursorTokenNavigation :: Model -> Property
+propCursorTokenNavigation model =
+  forAll (elements (contexts model)) $ \(path, _, _, _) ->
+    case cursorAt path (newCursor (compile model)) of
+      Left err -> counterexample (show err) False
+      Right focus ->
+        let leafPaths = [other | (other, _, selected, _) <- contexts model, isLeaf selected]
+            inside = filter (path `isPrefixOf`) leafPaths
+            after = filter (\other -> other > path && not (path `isPrefixOf` other)) leafPaths
+            before = filter (< path) leafPaths
+            maybeHead [] = Nothing
+            maybeHead (value : _) = Just value
+        in conjoin
+            [ map cursorPath (tokens focus) === inside
+            , fmap cursorPath (firstToken focus) === maybeHead inside
+            , fmap cursorPath (lastToken focus) === maybeHead (reverse inside)
+            , fmap cursorPath (nextToken focus) === maybeHead after
+            , fmap cursorPath (previousToken focus) === maybeHead (reverse before)
+            ]
+
+propCursorReplacement :: Model -> Model -> Property
+propCursorReplacement model replacement =
+  forAll (elements (contexts model)) $ \(path, prefix, selected, suffix) ->
+    case cursorAt path (newCursor (compile model)) of
+      Left err -> counterexample (show err) False
+      Right focus ->
+        let edited = replaceFocus (compile replacement) focus
+            expectedRange = rangeFromLength (byteLength prefix) (byteLength (source replacement))
+        in conjoin
+            [ Text.unpack (renderElement edited) === prefix ++ source replacement ++ suffix
+            , counterexample "rebuilt caches" (validCaches edited)
+            , fmap cursorRange (cursorAt path (newCursor edited)) === Right expectedRange
+            , Text.unpack (renderElement (cursorGreen focus)) === source selected
+            , cursorGreen (cursorRoot focus) === compile model
+            , conjoin
+                [ fmap describe (cursorAt other (newCursor edited))
+                    === Right (other, compile subtree,
+                      rangeFromLength expectedStart (byteLength (source subtree)))
+                | (other, otherPrefix, subtree, _) <- contexts model
+                , not (path `isPrefixOf` other || other `isPrefixOf` path)
+                -- Use Integer for the signed shift, then convert the validated
+                -- non-negative new offset back to the range's Natural unit.
+                , let shift = if other > path
+                        then toInteger (byteLength (source replacement)) - toInteger (byteLength (source selected))
+                        else 0
+                , let expectedStart = fromInteger (toInteger (byteLength otherPrefix) + shift)
+                ]
+            ]
+
+propCursorInvalidPaths :: Model -> Property
+propCursorInvalidPaths model = forAll (elements (contexts model)) $ \(path, _, selected, _) ->
+  let (index, err) = case selected of
+        Leaf _ _ -> (0, CannotDescendIntoToken)
+        Branch _ kids -> (length kids, ChildIndexOutOfBounds (length kids))
+      cursor = newCursor (compile model)
+  in conjoin
+      [ fmap cursorGreen (cursorAt (path ++ [index]) cursor) === Left err
+      , fmap cursorGreen (cursorAt (path ++ [-1]) cursor) === Left (NegativeChildIndex (-1))
+      ]
+
+offsetPaths :: TokenAtOffset (Cursor Kind) -> TokenAtOffset Path
+offsetPaths NoToken = NoToken
+offsetPaths (SingleToken cursor) = SingleToken (cursorPath cursor)
+offsetPaths (BetweenTokens left right) = BetweenTokens (cursorPath left) (cursorPath right)
+
+propCursorOffsetLookup :: Model -> Property
+propCursorOffsetLookup model =
+  forAll (elements (contexts model)) $ \(scope, _, _, _) ->
+  forAll (chooseInteger (0, toInteger (byteLength (source model)) + 1)) $ \rawOffset ->
+    let offset = fromInteger rawOffset
+        touching =
+          [ path
+          | (path, prefix, Leaf _ text, _) <- contexts model
+          , scope `isPrefixOf` path
+          , not (null text)
+          , byteLength prefix <= offset
+          , offset <= byteLength prefix + byteLength text
+          ]
+        expected = case touching of
+          [] -> NoToken
+          [path] -> SingleToken path
+          left : right : _ -> BetweenTokens left right
+    in case cursorAt scope (newCursor (compile model)) of
+        Left err -> counterexample (show err) False
+        Right focus -> offsetPaths (tokenAtOffset offset focus) === expected
+
+propCoveringRange :: Model -> Property
+propCoveringRange model =
+  forAll (chooseInteger (0, toInteger len + 1)) $ \a ->
+  forAll (chooseInteger (0, toInteger len + 1)) $ \b ->
+    let start = fromInteger (min a b)
+        end = fromInteger (max a b)
+        query = rangeFromLength start (end - start)
+        containing =
+          [ path
+          | (path, prefix, selected, _) <- contexts model
+          , byteLength prefix <= start
+          , end <= byteLength prefix + byteLength (source selected)
+          ]
+        -- Lexicographic maximum under the leftmost covering top-level branch:
+        -- retain an initial chain only, never jump to an ambiguous later sibling.
+        expected = case containing of
+          [] -> Nothing
+          first : rest -> Just (foldl descend first rest)
+        descend current candidate
+          | current `isPrefixOf` candidate = candidate
+          | otherwise = current
+    in fmap cursorPath (coveringElement query (newCursor (compile model))) === expected
+  where
+    len = byteLength (source model)
+
+propRanges :: NonNegative Integer -> NonNegative Integer -> NonNegative Integer -> Property
+propRanges (NonNegative rawStart) (NonNegative rawLen) (NonNegative rawPoint) =
+  let start = fromInteger rawStart
+      len = fromInteger rawLen
+      point = fromInteger rawPoint
+      range = rangeFromLength start len
+  in conjoin
+      [ rangeStart range === start
+      , rangeEnd range === start + len
+      , rangeLength range === len
+      , rangeIsEmpty range === (len == 0)
+      , textRange start (start + len) === Just range
+      , rangeContains point range === (start <= point && point < start + len)
+      , rangeContainsRange range (rangeFromLength (start + len) 0) === True
+      , if len > 0 then textRange (start + len) start === Nothing else property True
+      ]
+
+cursorRegressions :: Property
+cursorRegressions = once $ conjoin
+  [ map cursorPath (tokens tree) === [[1, 0], [1, 1], [2], [3, 0], [3, 1], [5], [6]]
+  , fmap cursorPath (firstToken tree) === Just [1, 0]
+  , fmap cursorPath (lastToken tree) === Just [6]
+  , fmap cursorPath (firstChild tree >>= nextToken) === Just [1, 0]
+  , fmap cursorPath (lastChild tree >>= previousToken) === Just [5]
+  , atPath [1, 1] (fmap cursorPath . nextToken) (Just [2])
+  , atPath [2] (fmap cursorPath . nextToken) (Just [3, 0])
+  , atPath [5] (fmap cursorPath . previousToken) (Just [3, 1])
+  , atPath [3] (fmap cursorPath . previousToken) (Just [2])
+  , atPath [3] (fmap cursorPath . nextToken) (Just [5])
+  , atPath [3, 0] cursorRange (rangeFromLength 1 4)
+  , offsetPaths (tokenAtOffset 0 tree) === SingleToken [1, 1]
+  , offsetPaths (tokenAtOffset 1 tree) === BetweenTokens [1, 1] [3, 0]
+  , offsetPaths (tokenAtOffset 3 tree) === SingleToken [3, 0]
+  , offsetPaths (tokenAtOffset 5 tree) === BetweenTokens [3, 0] [5]
+  , offsetPaths (tokenAtOffset 6 tree) === SingleToken [5]
+  , offsetPaths (tokenAtOffset 7 tree) === NoToken
+  , atPath [3] (offsetPaths . tokenAtOffset 1) (SingleToken [3, 0])
+  , atPath [3] (offsetPaths . tokenAtOffset 0) NoToken
+  , fmap cursorPath (coveringElement (rangeFromLength 0 0) tree) === Just [0]
+  , fmap cursorPath (coveringElement (rangeFromLength 1 0) tree) === Just [1, 1]
+  , fmap cursorPath (coveringElement (rangeFromLength 6 0) tree) === Just [5]
+  , fmap cursorPath (coveringElement (rangeFromLength 1 4) tree) === Just [3, 0]
+  , fmap cursorPath (coveringElement (rangeFromLength 0 5) tree) === Just []
+  , fmap cursorPath (coveringElement (rangeFromLength 6 1) tree) === Nothing
+  , tokensEmpty (newCursor (Node (greenNode Group [])))
+  , offsetPaths (tokenAtOffset 0 (newCursor (tok ""))) === NoToken
+  , fmap cursorPath (firstToken (newCursor (tok ""))) === Just []
+  , cursorRange sharedSecond === rangeFromLength 1 1
+  , cursorPath sharedSecond === [1]
+  , cursorGreen sharedSecond === shared
+  , renderElement (replaceFocus (tok "long") sharedSecond) === "along"
+  , cursorRange sharedSecond === rangeFromLength 1 1
+  , rangeEnd (cursorRange hugeCursor) === 2 ^ (70 :: Int)
+  , offsetPaths (tokenAtOffset (2 ^ (70 :: Int)) hugeCursor)
+      === SingleToken (replicate 70 1)
+  , rangeEnd (rangeFromLength (2 ^ (70 :: Int)) (2 ^ (70 :: Int))) === 2 ^ (71 :: Int)
+  ]
+  where
+    tok = Token . greenToken Name
+    empty = Node (greenNode Group [])
+    tree = newCursor (Node (greenNode Root
+      [ empty, Node (greenNode Group [tok "", tok "a", empty]), tok ""
+      , Node (greenNode Group [tok "😀", tok ""]), empty, tok "b", tok ""
+      ]))
+    atPath path inspect expected = case cursorAt path tree of
+      Left err -> counterexample (show err) False
+      Right focus -> inspect focus === expected
+    tokensEmpty cursor = conjoin
+      [ map cursorPath (tokens cursor) === []
+      , fmap cursorPath (firstToken cursor) === Nothing
+      , fmap cursorPath (lastToken cursor) === Nothing
+      , offsetPaths (tokenAtOffset 0 cursor) === NoToken
+      ]
+    shared = Node (greenNode Group [tok "a"])
+    sharedSecond = case childAt 1 (newCursor (Node (greenNode Root [shared, shared]))) of
+      Right cursor -> cursor
+      Left err -> error (show err)
+    hugeCursor = newCursor (iterate (\child -> Node (greenNode Group [child, child])) (tok "x") !! 70)
 
 regressions :: Property
 regressions = once $ conjoin
@@ -224,6 +494,15 @@ main = do
     , run "invalid paths" propInvalidPaths
     , run "immediate child replacement" propChildReplacement
     , run "empty, trivia, Unicode and unbounded-length regressions" regressions
+    , run "cursor occurrences and source ranges" propCursorOccurrences
+    , run "cursor parent, child and sibling navigation" propCursorNavigation
+    , run "cursor token navigation" propCursorTokenNavigation
+    , run "persistent cursor replacement and shifted ranges" propCursorReplacement
+    , run "cursor invalid paths" propCursorInvalidPaths
+    , run "boundary-aware token lookup" propCursorOffsetLookup
+    , run "covering range lookup" propCoveringRange
+    , run "half-open range invariants" propRanges
+    , run "cursor empty, boundary, shared-occurrence and large-range regressions" cursorRegressions
     ]
   unless (all isSuccess results) exitFailure
   where
