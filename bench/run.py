@@ -42,13 +42,14 @@ def main():
                       "--time-mode", "cpu", "--color", "never", "+RTS", "-T", "-A32m", "-RTS"]
     sources = [root / "graft.cabal", *sorted((root / "src").rglob("*.hs")),
                *sorted((root / "bench").glob("*.hs")), root / "bench/run.py"]
+    has_jj = (root / ".jj").is_dir()
     metadata = {
         "started_at": datetime.now(timezone.utc).isoformat(),
         "platform": platform.platform(), "ghc": output("ghc", "--numeric-version"),
         "cabal": output("cabal", "--numeric-version"),
         "parent_revision": output("jj", "--ignore-working-copy", "log", "-r", "@-", "--no-graph",
-                                  "-T", "commit_id ++ \"\\n\""),
-        "working_copy": output("jj", "--ignore-working-copy", "diff", "--stat"),
+                                  "-T", "commit_id ++ \"\\n\"") if has_jj else None,
+        "working_copy": output("jj", "--ignore-working-copy", "diff", "--stat") if has_jj else None,
         "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
         "source_sha256": {str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()
                           for path in sources},

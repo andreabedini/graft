@@ -24,6 +24,10 @@ extra-doc-files:
     CHANGELOG.md
     NOTICE
     docs/architecture.typ
+    docs/performance.md
+    bench/README.md
+    bench/results/2026-10-10/*.csv
+    bench/results/2026-10-10/environment.json
     licenses/ROWAN-MIT
 
 common warnings

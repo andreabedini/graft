@@ -237,8 +237,40 @@ Location handles need a design that addresses ambiguous empty and nested ranges.
 The usual newtype cast requires no tree traversal beyond the supplied predicate.
 Typed navigation scans candidate child lists or ancestor chains, with work
 determined by the user's cast implementation. Views perform no copying or
-normalization of source text. No allocation or runtime equivalence with Rowan
-is claimed without benchmarks.
+normalization of source text. The baseline measures Graft only. It establishes
+no allocation or runtime equivalence with Rowan.
+
+== Performance baseline
+
+The sixth milestone records two benchmark passes over 89 cases, using GHC
+9.12.2 with optimisation. Cases cover ASCII and Unicode token construction,
+wide nodes, deep unary trees, and a document with 1,000 line nodes and five
+tokens per line. Widths and depths reach 10,000. Prepared trees are fully
+evaluated before timing. Result consumers force rendered text, cached lengths,
+or sums of visited source ranges. Edited roots need no traversal of reused
+descendants to establish their caches.
+
+At 10,000 children, first-child lookup takes about 40 nanoseconds, while
+last-child lookup takes 210–218 microseconds. Replacing the first child takes
+50–60 microseconds because the new root still sums every child cache.
+These measurements identify wide navigation and ancestor reconstruction as
+candidates for controlled experiments. They do not select a new layout.
+
+Separate processes measure live heap after full garbage collection.
+A kibibyte is 1,024 bytes, and a mebibyte is 1,048,576 bytes.
+For 10,000 lines, retaining the latest edited root uses about 5.6 mebibytes,
+while retaining the original and 100 edited roots uses 17.1 mebibytes.
+A middle token cursor retains about 5.7 mebibytes. Retaining only its green
+token uses about 32 kibibytes. These totals subtract startup live memory but include fixture
+and runtime overhead.
+
+The measurement host uses an Intel Xeon w3-2435 with one selected CPU and
+a powersave governor. Some cases reach the three-second timing limit before
+meeting the requested precision. Results support broad cost comparisons, not
+fine rankings. `docs/performance.md` records the environment, raw CSV files,
+uncertainty, method, and conclusions. `bench/README.md` gives reproduction
+commands. This baseline supplies no duplicate-rate evidence that establishes
+a need for interning, and it makes no speed or memory comparison with Rowan.
 
 == Evidence and upstream study
 
@@ -303,9 +335,9 @@ its manifest identifies version 0.17.0. The inspected sources were:
 
 == Remaining work
 
-- The next milestone: a benchmark baseline for construction, wide/deep navigation,
-  repeated edits, rendering, and memory residency, before choosing interning,
-  vectors, additional offset caches, or other layouts.
+- Use the measured baseline for focused experiments on wide child navigation
+  and ancestor reconstruction, before choosing interning, vectors, additional
+  offset caches, or other layouts.
 - Location handles and occurrence tracking across snapshots.
 - Explicit trivia ownership and the desired Rowan compatibility boundary.
 

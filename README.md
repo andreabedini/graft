@@ -13,8 +13,9 @@ lookup, and replacement through a focus. The third milestone adds pure builders
 with checkpoints for wrapping previously emitted elements. The API is
 experimental. The fourth milestone adds child insertion, removal, and splicing
 through green nodes, paths, and cursor focuses. The fifth milestone adds typed
-node and token views that retain their original syntax cursors. Interning remains
-future work.
+node and token views that retain their original syntax cursors. The sixth
+milestone establishes a benchmark baseline for runtime, allocation, and retained
+memory. Interning remains future work.
 
 ## Build and test
 
@@ -385,11 +386,13 @@ upstream sources reviewed, and next steps. Build its PDF with Typst:
 typst compile docs/architecture.typ docs/architecture.pdf
 ```
 
-The next milestone is a benchmark baseline for construction, navigation, edits,
-rendering, and memory residency. Results will guide any interner or representation
-changes. Location handles, attached trivia, and compatibility with
-Rowan's current API require further design. Semantic update policy remains a
-layer above the concrete tree.
+The [benchmark report](docs/performance.md) records two passes over 89 cases and
+isolated measurements of retained trees, snapshots, and cursors. The
+[run guide](bench/README.md) gives reproduction and comparison commands.
+Wide child lookup and ancestor reconstruction are candidates for measured
+representation experiments. Location handles, attached trivia, and compatibility
+with Rowan's current API require further design. Semantic update policy remains
+a layer above the concrete tree.
 
 ## License
 

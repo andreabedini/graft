@@ -27,3 +27,7 @@
 * Model properties for typed casting laws, occurrences, fields, and edits, with
   malformed-syntax and lazy-query regressions. An exact-update example preserves
   existing number spelling when the semantic value does not change.
+* Reproducible benchmarks for construction, rendering, wide/deep navigation,
+  builders, typed fields, and repeated edits, with allocation statistics.
+* Isolated live-heap measurements for shared trees, snapshot histories, and
+  retained cursors; raw baseline results and a reproduction guide.
