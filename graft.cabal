@@ -1,0 +1,28 @@
+cabal-version:   3.0
+name:            graft
+version:         0.1.0.0
+synopsis:        Immutable, lossless concrete syntax trees
+description:
+    A small, idiomatic Haskell port of Rowan's concrete syntax infrastructure.
+    Green trees preserve token text, cache UTF-8 byte lengths, and support
+    structural sharing. Lexing and parsing are left to callers.
+category:        Language
+license:         MIT
+license-file:    LICENSE
+author:          Andrea Bedini
+maintainer:      andrea@bedini.au
+build-type:      Simple
+tested-with:     GHC ==9.12.2
+
+common warnings
+    ghc-options: -Wall
+
+library
+    import:           warnings
+    exposed-modules:  Graft Graft.Green
+    build-depends:
+        base >=4.18 && <4.22,
+        bytestring >=0.11 && <0.13,
+        text >=2.0 && <2.2
+    hs-source-dirs:   src
+    default-language: Haskell2010
