@@ -14,3 +14,7 @@
   deterministic covering-element lookup.
 * Model properties and regressions for occurrence ranges, shifted offsets,
   empty elements, shared subtrees, and large logical source ranges.
+* Pure persistent green tree builders with token emission, reuse of existing
+  green elements, and positional checkpoints for retroactive wrapping.
+* Structured errors for unbalanced construction, invalid roots, and checkpoint
+  bounds, with model properties and checkpoint lifetime regressions.

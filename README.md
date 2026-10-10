@@ -9,8 +9,9 @@ The **green tree** core provides ordered nodes and exact
 token text, cached UTF-8 byte lengths, lossless rendering, path lookup, and
 persistent subtree replacement. The second milestone adds immutable **red
 cursors** (zippers), contextual navigation, UTF-8 source ranges, boundary-aware
-lookup, and replacement through a focus. The API is experimental. Builders,
-checkpoints, interning, and typed AST views remain future work.
+lookup, and replacement through a focus. The third milestone adds pure builders
+with checkpoints for wrapping previously emitted elements. The API is
+experimental. Child splicing, interning, and typed AST views remain future work.
 
 ## Build and test
 
@@ -31,6 +32,10 @@ in shared trees. A failed property makes the test executable exit unsuccessfully
 Cursor properties check every occurrence against the model, navigation round
 trips, token order, offsets after edits, scoped offset lookup, and covering ranges.
 Regressions distinguish shared occurrences and test boundaries and empty elements.
+Builder properties compare streamed construction with an independent tree model.
+They cover checkpoint wrapping, later emission, repeated wrapping, saved builder
+branches, subtree reuse, and construction errors. Regressions cover checkpoint
+lifetime, empty values, and reuse of large cached lengths.
 
 ## Preserve formatting while changing a subtree
 
@@ -74,8 +79,8 @@ UTF-8 byte sequences is outside this representation's contract.
 
 ## Core API
 
-Import `Graft`, or use `Graft.Green`, `Graft.Edit`, `Graft.Range`, and `Graft.Cursor`
-separately. `GreenNode kind`
+Import `Graft`, or use `Graft.Green`, `Graft.Edit`, `Graft.Range`, `Graft.Cursor`,
+and `Graft.Builder` separately. `GreenNode kind`
 and `GreenToken kind` have hidden constructors. `GreenElement kind` exposes
 `Node` and `Token` for pattern matching. `kind` is the caller's syntax-kind type.
 
@@ -158,6 +163,69 @@ outside the focus. An empty query at a shared boundary favors the first covering
 child, including empty nodes/tokens; it does not necessarily select the deepest
 element among all possible branches.
 
+## Build a tree with delayed wrapping
+
+`GreenNodeBuilder kind` is a pure value for constructing a tree incrementally.
+A `Checkpoint` marks a position in its pending elements. It lets a parser open
+a node around elements that it already emitted.
+
+Using `Kind` from the first example, this builds `1 + 2` inside an expression:
+
+```haskell
+buildExpression :: Either BuilderError (GreenNode Kind)
+buildExpression = do
+  let initial = startNode Root newBuilder
+      marker = checkpoint initial
+      first = builderToken Number "1" initial
+  expression <- startNodeAt marker Expr first
+  let rest = builderToken Number "2" (builderToken Trivia " + " expression)
+  expressionDone <- finishNode rest
+  rootDone <- finishNode expressionDone
+  finishBuilder rootDone
+```
+
+`renderNode <$> buildExpression` returns `Right "1 + 2"`, with byte length 5.
+The expression contains both the token before `startNodeAt` and the tokens after
+it. Graft creates no punctuation or whitespace. The caller supplies every token.
+
+| Operation | Contract |
+| --- | --- |
+| `newBuilder` | Start with no open nodes or pending elements. |
+| `startNode kind builder` | Open a node at the current end. |
+| `builderToken kind text builder` | Append exact token text. |
+| `builderElement element builder` | Append an existing green node or token, reusing its value and cached length. |
+| `finishNode builder` | Close the innermost node and replace its pending children with that node. |
+| `checkpoint builder` | Mark the current end, counting pending elements rather than bytes. |
+| `startNodeAt marker kind builder` | Open a node around the suffix after the marker, including later emissions until it closes. |
+| `finishBuilder builder` | Return a single completed root node after all open nodes close. |
+
+Keep an old builder value to continue construction along independent branches.
+Adding an existing green element traverses none of its descendants. This lets
+syntax-preserving transformations reuse untouched subtrees.
+
+### Construction errors and checkpoint lifetime
+
+`finishNode`, `startNodeAt`, and `finishBuilder` return `Either BuilderError`.
+`finishNode` returns `NoOpenNode` if there is no node to close. `finishBuilder`
+first reports `UnclosedNodes`, with the number of open nodes. Once balanced, it
+reports `EmptyBuilder`, `MultipleRoots` with the pending count, or `TokenRoot`.
+It never closes nodes implicitly. Failed operations leave the input value available.
+
+`startNodeAt` accepts a marker at the current end, even for an initially empty
+suffix. It rejects a position beyond that end with `CheckpointOutOfBounds`.
+It rejects a position before the innermost open node with
+`CheckpointBeforeCurrentNode`. Both errors carry the marker position followed by
+the current count or the current node's starting position. With no open node,
+it can wrap a suffix at the top level.
+
+Checkpoints follow Rowan's positional semantics. They record neither builder
+ownership nor history. Closing a node collapses its children into one pending
+element. A marker inside those children can become out of bounds. Later emission
+can make that numeric position valid again. A marker from another builder can
+also pass the bounds tests. Use markers with their corresponding construction
+history. A marker before an expression can be reused for repeated wrapping,
+such as building a chain of left-associative operators.
+
 ## Architecture and remaining work
 
 Graft retains Rowan's separation of immutable syntax from contextual navigation.
@@ -170,6 +238,7 @@ Its initial representation deliberately differs:
 | Fixed-width byte lengths and cached child offsets | Unbounded byte lengths; cursors cache focus offsets while green children have no offset cache |
 | Leading/trailing trivia APIs | Trivia supplied as ordinary token children |
 | Separate node/token cursors with reference counting | One immutable element zipper; persistent replacement by focus or path |
+| Mutable builder with positional checkpoints | Pure persistent builder with the same positional wrapping and structured errors |
 | Builder cache for deduplication | Explicit value reuse; no interning |
 
 The [architecture note](docs/architecture.typ) explains the decisions, costs,
@@ -179,10 +248,9 @@ upstream sources reviewed, and next steps. Build its PDF with Typst:
 typst compile docs/architecture.typ docs/architecture.pdf
 ```
 
-The next milestone is Rowan-style builders and checkpoints. Later work includes
-persistent child insertion/removal/splicing;
-typed AST views that retain concrete syntax; and benchmarks before selecting an
-interner or changing the representation. Attached trivia and compatibility with
+The next milestone is persistent child insertion, removal, and splicing.
+Later work includes typed AST views that retain concrete syntax, and benchmarks
+before selecting an interner or changing the representation. Attached trivia and compatibility with
 Rowan's current API require further design. Semantic update policy remains a
 layer above the concrete tree.
 

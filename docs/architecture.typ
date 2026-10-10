@@ -113,6 +113,46 @@ innermost element on that branch, not a globally deepest candidate. Out-of-focus
 queries return no element. These boundary rules are part of Graft's contract;
 they do not promise Rowan's exact tie-breaking behavior.
 
+== Pure builders and positional checkpoints
+
+The third milestone adds `GreenNodeBuilder kind`, a pure value for incremental
+construction. It stores pending elements in reverse source order, their cached
+count, and a stack of open node kinds and starting positions. A `Checkpoint`
+records a position in this pending forest, counting elements rather than bytes.
+`startNode` opens a node at the current end. `builderToken` appends exact text.
+`builderElement` appends an existing green element and reuses its cached length.
+
+`finishNode` removes the pending suffix belonging to the innermost node. It
+reverses that suffix into source order, constructs the node, and replaces the
+suffix with one pending element. Descendants need no traversal. The builder
+uses ordinary lists and values, with no mutation or interning. Keeping an old
+builder allows independent construction branches, while retaining its pending
+trees and open node stack.
+
+`startNodeAt` opens a node at a checkpoint. It includes the elements already
+emitted after that position and further elements emitted before the node closes.
+This supports delayed wrapping when a parser recognizes an operator after
+emitting its left operand. Repeated wrapping at the same position supports
+left-associative expressions. A marker at the end can start an empty node.
+
+Graft follows Rowan's positional validation: the marker cannot exceed the
+pending count or precede the innermost open node. It records no ownership or
+history. Closing a node collapses positions. Later emissions can make an old
+position valid again, and an unrelated builder's marker can pass the same tests.
+Applications must use checkpoints with their corresponding construction history.
+
+Errors use `Either BuilderError`, replacing Rowan's assertions. `finishNode`
+rejects a builder with no open node. `finishBuilder` first rejects unclosed
+nodes, then requires exactly one completed root node. This explicit balance
+check is stricter than Rowan's final forest check. Finishing never closes nodes
+implicitly, and a failed operation leaves the input value available.
+
+Opening nodes, marking positions, and appending existing elements take constant
+time. Closing a node costs a traversal of its immediate children. Token creation
+retains the green core's UTF-8 counting cost. Finishing checks the open stack
+to report its depth. Saved builders retain their earlier construction state,
+so clients can release old values when branching is no longer needed.
+
 == Evidence and upstream study
 
 The first milestone tests rendering and byte counts against an independent model
@@ -130,6 +170,14 @@ tokens, multibyte interiors, shared-boundary ambiguity, EOF, repeated shared
 subtrees at distinct offsets, and lookup in a shared graph beyond machine-word
 length without rendering it.
 
+Builder properties stream start, token, and finish events from an independent
+tree model. They compare shape, exact source, and every cached byte length.
+Generated cases check retroactive and repeated wrapping, emissions after opening
+a wrapper, independent builder branches, reuse of existing elements, checkpoint
+bounds, and balance at every close. Regressions cover invalid root shapes,
+empty construction, top-level wrapping, markers from unrelated builders, revived
+positions, and reuse of large shared trees without rendering them.
+
 The implementation study used Rowan revision
 `b6f1cb6494a99a2264186d110b1b170989774814`, retrieved on 10 October 2026;
 its manifest identifies version 0.17.0. The inspected sources were:
@@ -141,7 +189,8 @@ its manifest identifies version 0.17.0. The inspected sources were:
 - #link(upstream + "src/cursor.rs")[Cursors]: contextual navigation and
   replacement through ancestors.
 - #link(upstream + "src/green/builder.rs")[Builders] and
-  #link(upstream + "src/green/node_cache.rs")[cache]: checkpoints and interning.
+  #link(upstream + "src/green/node_cache.rs")[cache]: the pending forest, open-node
+  stack, checkpoint validation, suffix wrapping, and interning.
 - #link(upstream + "src/green.rs")[Green tests],
   #link(upstream + "src/syntax_text.rs")[text tests], and
   #link(upstream + "tests/tidy.rs")[formatting test]. Green tests concern Rust
@@ -150,9 +199,7 @@ its manifest identifies version 0.17.0. The inspected sources were:
 
 == Remaining work
 
-- The next milestone: Rowan-style builders and checkpoints with validation of
-  balanced construction.
-- Persistent child insertion, removal, and splicing.
+- The next milestone: persistent child insertion, removal, and splicing.
 - Typed AST views that keep access to the concrete tokens and trivia.
 - Explicit trivia ownership and the desired Rowan compatibility boundary.
 - Benchmarks of wide/deep trees, repeated edits, rendering, and memory residency
