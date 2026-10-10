@@ -5,8 +5,10 @@ module Graft
   , module Graft.Range
   , module Graft.Cursor
   , module Graft.Builder
+  , module Graft.Ast
   ) where
 
+import Graft.Ast
 import Graft.Builder
 import Graft.Cursor
 import Graft.Edit
