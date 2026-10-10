@@ -2,6 +2,7 @@
 
 module Main (main) where
 
+import BuilderTests (builderProperties)
 import Control.Monad (unless)
 import Data.Char (chr, ord)
 import Data.List (find, isPrefixOf)
@@ -484,7 +485,7 @@ regressions = once $ conjoin
 
 main :: IO ()
 main = do
-  results <- sequence
+  results <- sequence $
     [ run "lossless rendering" propRendering
     , run "cached UTF-8 lengths at every path" propLengths
     , run "token round-trip and byte length" propToken
@@ -503,7 +504,7 @@ main = do
     , run "covering range lookup" propCoveringRange
     , run "half-open range invariants" propRanges
     , run "cursor empty, boundary, shared-occurrence and large-range regressions" cursorRegressions
-    ]
+    ] ++ [run title prop | (title, prop) <- builderProperties]
   unless (all isSuccess results) exitFailure
   where
     run title prop = do

@@ -38,6 +38,7 @@ test-suite graft-tests
     import:           warnings
     type:             exitcode-stdio-1.0
     main-is:          Main.hs
+    other-modules:    BuilderTests
     hs-source-dirs:   test
     build-depends:
         base >=4.18 && <4.22,
