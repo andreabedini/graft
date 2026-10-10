@@ -1,9 +1,4 @@
-#set document(title: "Graft: concrete syntax architecture", author: "Andrea Bedini")
-#set page(paper: "a4", numbering: "1")
-#set text(font: "Libertinus Serif", size: 11pt)
-#set heading(numbering: "1.")
-
-= Graft: concrete syntax architecture
+# Graft: concrete syntax architecture
 
 Graft provides concrete syntax infrastructure for bidirectional parsing,
 printing, and semantic updates that preserve untouched text. A concrete syntax
@@ -11,7 +6,7 @@ tree retains the source spelling and trivia (whitespace and comments), rather
 than just the semantic structure of an abstract syntax tree (AST). Parsers and
 lexers are supplied by applications.
 
-== The immutable core
+## The immutable core
 
 A green token is a leaf with a syntax kind, exact Unicode text, and a cached
 UTF-8 byte length. A green node has a syntax kind, ordered child elements, and
@@ -31,7 +26,7 @@ source fragments must appear in token text: Graft does not synthesize spaces,
 discard comments, or normalize Unicode or line endings. Valid Unicode text
 round-trips exactly; arbitrary invalid UTF-8 bytes are outside the contract.
 
-== Why this representation differs from Rowan
+## Why this representation differs from Rowan
 
 Rowan uses compact reference-counted allocations, integer syntax tags,
 fixed-width lengths, and child offsets. Graft starts with ordinary algebraic
@@ -48,7 +43,7 @@ as explicit future decisions. Graft supplies structural equality, not a public
 pointer-identity operation. Independently constructed equal trees are not
 automatically deduplicated.
 
-== Persistent updates and their costs
+## Persistent updates and their costs
 
 A `Path` is a list of zero-based child indices, counting nodes and tokens. The
 empty path selects the root. `elementAt` looks up the selected element;
@@ -70,7 +65,7 @@ cannot eliminate repeated source occurrences. Deep recursion may exhaust the
 stack. No performance or memory advantage over Rowan is claimed without
 benchmarks.
 
-== Child insertion, removal, and splicing
+## Child insertion, removal, and splicing
 
 The fourth milestone adds `spliceChildren`, which replaces a half-open range
 of immediate children with a list of green elements. Its integer boundaries
@@ -107,7 +102,7 @@ new snapshot. Applications must reconsider paths after editing and start a new
 cursor to observe the result. This milestone supplies individual structural
 edits without occurrence tracking or a batch-edit protocol across versions.
 
-== Red cursors and source ranges
+## Red cursors and source ranges
 
 The second milestone adds an immutable red cursor: a zipper focusing a node or
 token occurrence with its context. `Cursor kind` contains a green focus, its
@@ -150,7 +145,7 @@ innermost element on that branch, not a globally deepest candidate. Out-of-focus
 queries return no element. These boundary rules are part of Graft's contract;
 they do not promise Rowan's exact tie-breaking behavior.
 
-== Pure builders and positional checkpoints
+## Pure builders and positional checkpoints
 
 The third milestone adds `GreenNodeBuilder kind`, a pure value for incremental
 construction. It stores pending elements in reverse source order, their cached
@@ -190,7 +185,7 @@ retains the green core's UTF-8 counting cost. Finishing checks the open stack
 to report its depth. Saved builders retain their earlier construction state,
 so clients can release old values when branching is no longer needed.
 
-== Typed AST views and semantic updates
+## Typed AST views and semantic updates
 
 The fifth milestone adds `AstNode` and `AstToken`, Haskell type classes for
 application-defined views over node and token occurrences. Each class associates
@@ -240,7 +235,7 @@ determined by the user's cast implementation. Views perform no copying or
 normalization of source text. The baseline measures Graft only. It establishes
 no allocation or runtime equivalence with Rowan.
 
-== Performance baseline
+## Performance baseline
 
 The sixth milestone records two benchmark passes over 89 cases, using GHC
 9.12.2 with optimisation. Cases cover ASCII and Unicode token construction,
@@ -267,12 +262,13 @@ and runtime overhead.
 The measurement host uses an Intel Xeon w3-2435 with one selected CPU and
 a powersave governor. Some cases reach the three-second timing limit before
 meeting the requested precision. Results support broad cost comparisons, not
-fine rankings. `docs/performance.md` records the environment, raw CSV files,
-uncertainty, method, and conclusions. `bench/README.md` gives reproduction
-commands. This baseline supplies no duplicate-rate evidence that establishes
-a need for interning, and it makes no speed or memory comparison with Rowan.
+fine rankings. [`docs/performance.md`](performance.md) records the environment,
+raw CSV files, uncertainty, method, and conclusions.
+[`bench/README.md`](../bench/README.md) gives reproduction commands. This
+baseline supplies no duplicate-rate evidence that establishes a need for
+interning, and it makes no speed or memory comparison with Rowan.
 
-== Evidence and upstream study
+## Evidence and upstream study
 
 The first milestone tests rendering and byte counts against an independent model
 tree, verifies every cache, checks the exact changed source span, and checks
@@ -316,24 +312,29 @@ The implementation study used Rowan revision
 `b6f1cb6494a99a2264186d110b1b170989774814`, retrieved on 10 October 2026;
 its manifest identifies version 0.17.0. The inspected sources were:
 
-#let upstream = "https://github.com/rust-analyzer/rowan/blob/b6f1cb6494a99a2264186d110b1b170989774814/"
-- #link(upstream + "src/green/node.rs")[Green nodes] and
-  #link(upstream + "src/green/token.rs")[tokens]: lengths, child storage,
+- [Green nodes][node] and [tokens][token]: lengths, child storage,
   rendering, trivia, and green child insertion/removal/splicing.
-- #link(upstream + "src/cursor.rs")[Cursors]: contextual navigation and
-  replacement through ancestors.
-- #link(upstream + "src/ast.rs")[AST support]: the node trait, typed child
-  filtering, and location-based syntax and AST pointers.
-- #link(upstream + "src/green/builder.rs")[Builders] and
-  #link(upstream + "src/green/node_cache.rs")[cache]: the pending forest, open-node
+- [Cursors][cursor]: contextual navigation and replacement through ancestors.
+- [AST support][ast]: the node trait, typed child filtering, and location-based
+  syntax and AST pointers.
+- [Builders][builder] and [cache][node-cache]: the pending forest, open-node
   stack, checkpoint validation, suffix wrapping, and interning.
-- #link(upstream + "src/green.rs")[Green tests],
-  #link(upstream + "src/syntax_text.rs")[text tests], and
-  #link(upstream + "tests/tidy.rs")[formatting test]. Green tests concern Rust
-  thread traits and sizes; text tests exercise empty and differently chunked
-  strings. The README also points to rust-analyzer integration tests.
+- [Green tests][green], [text tests][syntax-text], and
+  [formatting test][tidy]. Green tests concern Rust thread traits and sizes;
+  text tests exercise empty and differently chunked strings. The README also
+  points to rust-analyzer integration tests.
 
-== Remaining work
+[node]: https://github.com/rust-analyzer/rowan/blob/b6f1cb6494a99a2264186d110b1b170989774814/src/green/node.rs
+[token]: https://github.com/rust-analyzer/rowan/blob/b6f1cb6494a99a2264186d110b1b170989774814/src/green/token.rs
+[cursor]: https://github.com/rust-analyzer/rowan/blob/b6f1cb6494a99a2264186d110b1b170989774814/src/cursor.rs
+[ast]: https://github.com/rust-analyzer/rowan/blob/b6f1cb6494a99a2264186d110b1b170989774814/src/ast.rs
+[builder]: https://github.com/rust-analyzer/rowan/blob/b6f1cb6494a99a2264186d110b1b170989774814/src/green/builder.rs
+[node-cache]: https://github.com/rust-analyzer/rowan/blob/b6f1cb6494a99a2264186d110b1b170989774814/src/green/node_cache.rs
+[green]: https://github.com/rust-analyzer/rowan/blob/b6f1cb6494a99a2264186d110b1b170989774814/src/green.rs
+[syntax-text]: https://github.com/rust-analyzer/rowan/blob/b6f1cb6494a99a2264186d110b1b170989774814/src/syntax_text.rs
+[tidy]: https://github.com/rust-analyzer/rowan/blob/b6f1cb6494a99a2264186d110b1b170989774814/tests/tidy.rs
+
+## Remaining work
 
 - Use the measured baseline for focused experiments on wide child navigation
   and ancestor reconstruction, before choosing interning, vectors, additional

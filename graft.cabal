@@ -23,7 +23,7 @@ extra-doc-files:
     README.md
     CHANGELOG.md
     NOTICE
-    docs/architecture.typ
+    docs/architecture.md
     docs/performance.md
     bench/README.md
     bench/results/2026-10-10/*.csv

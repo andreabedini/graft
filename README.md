@@ -379,12 +379,8 @@ Its initial representation deliberately differs:
 | Generic range bounds for green child splicing | Validated half-open child indices with node/path/focus entry points |
 | `AstNode` trait, language conversion, and `AstChildren` iterator | `AstNode`/`AstToken` classes with associated kind types and lazy lists |
 
-The [architecture note](docs/architecture.typ) explains the decisions, costs,
-upstream sources reviewed, and next steps. Build its PDF with Typst:
-
-```sh
-typst compile docs/architecture.typ docs/architecture.pdf
-```
+The [architecture note](docs/architecture.md) explains the decisions, costs,
+upstream sources reviewed, and next steps.
 
 The [benchmark report](docs/performance.md) records two passes over 89 cases and
 isolated measurements of retained trees, snapshots, and cursors. The
