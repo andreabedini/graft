@@ -16,7 +16,9 @@ author:          Andrea Bedini
 maintainer:      andrea@bedini.au
 build-type:      Simple
 tested-with:     GHC ==9.12.2
-extra-source-files: examples/ExactUpdate.hs
+extra-source-files:
+    examples/ExactUpdate.hs
+    bench/run.py
 extra-doc-files:
     README.md
     CHANGELOG.md
@@ -35,6 +37,21 @@ library
         bytestring >=0.11 && <0.13,
         text >=2.0 && <2.2
     hs-source-dirs:   src
+    default-language: Haskell2010
+
+benchmark graft-bench
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    main-is:          Main.hs
+    other-modules:    Fixtures Residency
+    hs-source-dirs:   bench
+    build-depends:
+        base >=4.18 && <4.22,
+        deepseq >=1.4 && <1.6,
+        graft,
+        tasty-bench >=0.3.5 && <0.4,
+        text >=2.0 && <2.2
+    ghc-options:      -rtsopts -with-rtsopts=-T -fproc-alignment=64
     default-language: Haskell2010
 
 test-suite graft-tests
