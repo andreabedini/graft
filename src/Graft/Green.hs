@@ -23,10 +23,9 @@ module Graft.Green
   , renderElement
   ) where
 
-import qualified Data.ByteString as BS
 import qualified Data.Foldable as Foldable
 import Data.Text (Text)
-import qualified Data.Text.Encoding as Encoding
+import qualified Data.Text.Foreign as Text
 import qualified Data.Text.Lazy as Lazy
 import qualified Data.Text.Lazy.Builder as Builder
 
@@ -60,11 +59,10 @@ greenNode :: kind -> [GreenElement kind] -> GreenNode kind
 greenNode kind children =
   GreenNode kind (Foldable.foldl' (\n child -> n + elementTextLength child) 0 children) children
 
--- | Construct a token. Counting bytes currently encodes the text once, taking
--- time and temporary space proportional to its UTF-8 size.
+-- | Construct a token. 'Text' stores UTF-8 internally, so reading the byte
+-- length takes constant time and copies nothing.
 greenToken :: kind -> Text -> GreenToken kind
-greenToken kind text =
-  GreenToken kind (BS.length (Encoding.encodeUtf8 text)) text
+greenToken kind text = GreenToken kind (Text.lengthWord8 text) text
 
 -- | The caller-defined kind of a node.
 nodeKind :: GreenNode kind -> kind

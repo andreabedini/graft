@@ -59,7 +59,7 @@ reused. Ancestor lengths are recomputed by summing immediate child caches, so no
 untouched descendant text is traversed. The original root remains available.
 
 Node construction costs a traversal of its immediate children. Token construction
-currently allocates a temporary UTF-8 encoding to count bytes. Path lookup scans
+reads the UTF-8 byte length of the `Text` in constant time. Path lookup scans
 list prefixes. Replacement cost follows the sum of ancestor child counts.
 Rendering traverses every token occurrence and allocates the output; sharing
 cannot eliminate repeated source occurrences. Deep recursion may exhaust the
@@ -182,7 +182,7 @@ implicitly, and a failed operation leaves the input value available.
 
 Opening nodes, marking positions, and appending existing elements take constant
 time. Closing a node costs a traversal of its immediate children. Token creation
-retains the green core's UTF-8 counting cost. Finishing checks the open stack
+has the constant cost of `greenToken`. Finishing checks the open stack
 to report its depth. Saved builders retain their earlier construction state,
 so clients can release old values when branching is no longer needed.
 
