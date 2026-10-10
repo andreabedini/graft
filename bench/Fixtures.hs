@@ -99,31 +99,31 @@ cursorEnd = rangeEnd . cursorRange
 
 -- A strict consumer: each adjacent sibling and range contributes to the result.
 siblingSum :: Cursor Kind -> TextLength
-siblingSum root = go 0 (firstChild root)
+siblingSum root = go 0 (cursorFirstChild root)
   where
     go total Nothing = total
     go total (Just cursor) = let next = total + cursorEnd cursor
-      in next `seq` go next (nextSibling cursor)
+      in next `seq` go next (cursorNextSibling cursor)
 
 buildTokens :: [Text] -> GreenNode Kind
-buildTokens texts = checked (finishBuilder (checked (finishNode emitted)))
+buildTokens texts = checked (runBuilder (checked (finishNode emitted)))
   where
-    emitted = go (startNode Root newBuilder) texts
+    emitted = go (startNode Root emptyBuilder) texts
     go builder [] = builder
-    go builder [text] = builderToken Number text builder
-    go builder (text : rest) = let next = builderToken Name text builder
+    go builder [text] = emitToken Number text builder
+    go builder (text : rest) = let next = emitToken Name text builder
       in next `seq` go next rest
 
 buildReuse :: GreenNode Kind -> GreenNode Kind
-buildReuse node = checked (finishBuilder (checked (finishNode emitted)))
-  where emitted = List.foldl' (flip builderElement) (startNode Root newBuilder) (nodeChildren node)
+buildReuse node = checked (runBuilder (checked (finishNode emitted)))
+  where emitted = List.foldl' (flip emitElement) (startNode Root emptyBuilder) (nodeChildren node)
 
 buildCheckpoint :: GreenNode Kind -> GreenNode Kind
-buildCheckpoint node = checked (finishBuilder closed)
+buildCheckpoint node = checked (runBuilder closed)
   where
-    opened = startNode Root newBuilder
+    opened = startNode Root emptyBuilder
     marker = checkpoint opened
-    emitted = List.foldl' (flip builderElement) opened (nodeChildren node)
+    emitted = List.foldl' (flip emitElement) opened (nodeChildren node)
     wrapped = checked (startNodeAt marker Group emitted)
     closed = checked (finishNode (checked (finishNode wrapped)))
 
@@ -151,7 +151,7 @@ checkFixtures = do
   let document = Node (documentTree 1000)
       before = documentSource 1000
       path = [499, 2]
-      cursor = checked (cursorAt path (newCursor document))
+      cursor = checked (cursorAt path (rootCursor document))
       updated = editMany 100 path document
       expected = Text.concat [documentSource 499, Text.concat
         ["名500", "  = ", "100", " -- keep", "\r\n"],
@@ -160,7 +160,7 @@ checkFixtures = do
   assert "repeated exact edits" (renderElement updated == expected)
   assert "focus/path edit agreement" (replaceFocus (Token (greenToken Number "100")) cursor == updated)
   assert "original snapshot preserved" (renderElement document == before)
-  assert "typed groups" (length (astChildren (newCursor document) :: [Grouped]) == 1000)
+  assert "typed groups" (length (astChildren (rootCursor document) :: [Grouped]) == 1000)
   assert "history count" (length (snapshots 100 path document) == 101)
   putStrLn "Benchmark fixtures and observations: PASS"
   where
@@ -168,7 +168,7 @@ checkFixtures = do
     checkWide count = do
       let texts = wideSource count
           node = wideTree texts
-          root = newCursor (Node node)
+          root = rootCursor (Node node)
           insertion = Token (greenToken Number "NEW")
           inserted = checked (spliceChildren (count `div` 2) (count `div` 2) [insertion] node)
       _ <- evaluate (forceElement (Node node))
@@ -178,14 +178,14 @@ checkFixtures = do
       assert "checkpoint source" (renderNode (buildCheckpoint node) == Text.concat texts)
       assert "wide UTF-8 cache" (nodeTextLength node == sum
         [4 + length (show index) | index <- [1 .. count]])
-      assert "last offset" (cursorEnd (checked (childAt (count - 1) root)) == nodeTextLength node)
-      assert "sibling observation" (siblingSum root == sum (map cursorEnd (children root)))
+      assert "last offset" (cursorEnd (checked (cursorChildAt (count - 1) root)) == nodeTextLength node)
+      assert "sibling observation" (siblingSum root == sum (map cursorEnd (cursorChildren root)))
       assert "typed last token" (cursorEnd (tokenSyntax (selected (astToken root :: Maybe Numbered))) == nodeTextLength node)
       assert "splice exact source" (renderNode inserted == Text.concat
         [Text.concat (take (count `div` 2) texts), "NEW", Text.concat (drop (count `div` 2) texts)])
     checkDeep depth = do
       let node = deepTree depth
-          root = newCursor (Node node)
+          root = rootCursor (Node node)
           path = replicate (depth + 1) 0
           leaf = checked (cursorAt path root)
       _ <- evaluate (forceElement (Node node))

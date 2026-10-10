@@ -116,7 +116,7 @@ their grammar's constraints.
 
 A `Cursor kind` focuses either a node or a token in one immutable tree snapshot.
 Its `TextRange` is a half-open interval of UTF-8 byte offsets.
-`newCursor` starts at byte offset zero. Paths identify occurrences within that
+`rootCursor` starts at byte offset zero. Paths identify occurrences within that
 snapshot; equal green subtrees can have different paths and source ranges.
 `cursorAt` follows a path relative to the current focus.
 
@@ -125,7 +125,7 @@ Using `original` and `Kind` from the program above:
 ```haskell
 replaceExpression :: Either PathError (TextRange, GreenElement Kind)
 replaceExpression = do
-  focus <- cursorAt [2] (newCursor (Node original))
+  focus <- cursorAt [2] (rootCursor (Node original))
   let replacement = Node (greenNode Expr [tok Number "2"])
   pure (cursorRange focus, replaceFocus replacement focus)
 ```
@@ -137,16 +137,16 @@ and range. Start a new cursor on the result to navigate the edited snapshot.
 | Operation | Contract |
 | --- | --- |
 | `cursorGreen`, `cursorKind`, `cursorRange`, `cursorPath` | Read the focus and its absolute byte range and root-relative path. |
-| `cursorRoot`, `parent` | Restore the original root or immediate parent. |
-| `childAt`, `firstChild`, `lastChild`, `children` | Navigate immediate children, counting nodes, tokens, and empty elements. |
-| `nextSibling`, `previousSibling` | Move between immediate siblings. |
-| `ancestors` | Focus followed by parents, nearest first. |
-| `descendants` | Preorder traversal including the focus and every node/token occurrence. |
-| `tokens`, `firstToken`, `lastToken` | Token occurrences within the focus, including empty tokens. Tokenless nodes are skipped. |
-| `nextToken`, `previousToken` | Tokens after or before the entire focused subtree in the snapshot. |
+| `cursorRoot`, `cursorParent` | Restore the original root or immediate parent. |
+| `cursorChildAt`, `cursorFirstChild`, `cursorLastChild`, `cursorChildren` | Navigate immediate children, counting nodes, tokens, and empty elements. |
+| `cursorNextSibling`, `cursorPreviousSibling` | Move between immediate siblings. |
+| `cursorAncestors` | Focus followed by parents, nearest first. |
+| `cursorDescendants` | Preorder traversal including the focus and every node/token occurrence. |
+| `cursorTokens`, `cursorFirstToken`, `cursorLastToken` | Token occurrences within the focus, including empty tokens. Tokenless nodes are skipped. |
+| `cursorNextToken`, `cursorPreviousToken` | Tokens after or before the entire focused subtree in the snapshot. |
 | `replaceFocus replacement focus` | Rebuild ancestors to produce a new green root, retaining untouched subtrees. |
 
-Failed `childAt` and `cursorAt` return `PathError`. Optional navigation returns
+Failed `cursorChildAt` and `cursorAt` return `PathError`. Optional navigation returns
 `Nothing` at a missing neighbor. Cursors expose no occurrence equality or pointer
 identity; compare paths only when the tree snapshot is known to be the same.
 
@@ -175,7 +175,7 @@ element among all possible branches.
 
 ## Build a tree with delayed wrapping
 
-`GreenNodeBuilder kind` is a pure value for constructing a tree incrementally.
+`Builder kind` is a pure value for constructing a tree incrementally.
 A `Checkpoint` marks a position in its pending elements. It lets a parser open
 a node around elements that it already emitted.
 
@@ -184,14 +184,14 @@ Using `Kind` from the first example, this builds `1 + 2` inside an expression:
 ```haskell
 buildExpression :: Either BuilderError (GreenNode Kind)
 buildExpression = do
-  let initial = startNode Root newBuilder
+  let initial = startNode Root emptyBuilder
       marker = checkpoint initial
-      first = builderToken Number "1" initial
+      first = emitToken Number "1" initial
   expression <- startNodeAt marker Expr first
-  let rest = builderToken Number "2" (builderToken Trivia " + " expression)
+  let rest = emitToken Number "2" (emitToken Trivia " + " expression)
   expressionDone <- finishNode rest
   rootDone <- finishNode expressionDone
-  finishBuilder rootDone
+  runBuilder rootDone
 ```
 
 `renderNode <$> buildExpression` returns `Right "1 + 2"`, with byte length 5.
@@ -200,14 +200,14 @@ it. Graft creates no punctuation or whitespace. The caller supplies every token.
 
 | Operation | Contract |
 | --- | --- |
-| `newBuilder` | Start with no open nodes or pending elements. |
+| `emptyBuilder` | Start with no open nodes or pending elements. |
 | `startNode kind builder` | Open a node at the current end. |
-| `builderToken kind text builder` | Append exact token text. |
-| `builderElement element builder` | Append an existing green node or token, reusing its value and cached length. |
+| `emitToken kind text builder` | Append exact token text. |
+| `emitElement element builder` | Append an existing green node or token, reusing its value and cached length. |
 | `finishNode builder` | Close the innermost node and replace its pending children with that node. |
 | `checkpoint builder` | Mark the current end, counting pending elements rather than bytes. |
 | `startNodeAt marker kind builder` | Open a node around the suffix after the marker, including later emissions until it closes. |
-| `finishBuilder builder` | Return a single completed root node after all open nodes close. |
+| `runBuilder builder` | Return a single completed root node after all open nodes close. |
 
 Keep an old builder value to continue construction along independent branches.
 Adding an existing green element traverses none of its descendants. This lets
@@ -215,8 +215,8 @@ syntax-preserving transformations reuse untouched subtrees.
 
 ### Construction errors and checkpoint lifetime
 
-`finishNode`, `startNodeAt`, and `finishBuilder` return `Either BuilderError`.
-`finishNode` returns `NoOpenNode` if there is no node to close. `finishBuilder`
+`finishNode`, `startNodeAt`, and `runBuilder` return `Either BuilderError`.
+`finishNode` returns `NoOpenNode` if there is no node to close. `runBuilder`
 first reports `UnclosedNodes`, with the number of open nodes. Once balanced, it
 reports `EmptyBuilder`, `MultipleRoots` with the pending count, or `TokenRoot`.
 It never closes nodes implicitly. Failed operations leave the input value available.
@@ -320,7 +320,7 @@ setNumberText text literal =
   replaceFocus (Token (greenToken Number text)) (tokenSyntax literal)
 ```
 
-`astChild (newCursor (Node original)) :: Maybe Expression` selects the expression.
+`astChild (rootCursor (Node original)) :: Maybe Expression` selects the expression.
 `expressionNumber` selects its first immediate number token. `setNumberText`
 returns a new green root, preserving surrounding tokens and the old view.
 The application decides the replacement spelling and validates its semantic value.

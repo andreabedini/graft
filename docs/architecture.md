@@ -112,7 +112,7 @@ original parent node and offset, its context, the child's index, preceding
 siblings in reverse order, and following siblings. This is an ordinary algebraic
 data type with no unsafe code, mutable references, or separate allocation layer.
 
-`newCursor` starts at offset zero. Child navigation computes offsets from cached
+`rootCursor` starts at offset zero. Child navigation computes offsets from cached
 sibling lengths. Parent and adjacent sibling moves restore context in constant
 time; child indexing and last-child navigation scan lists. `cursorPath` and
 `cursorRoot` walk the ancestor chain. Traversals are lazy and visit shared green
@@ -148,12 +148,12 @@ they do not promise Rowan's exact tie-breaking behavior.
 
 ## Pure builders and positional checkpoints
 
-The third milestone adds `GreenNodeBuilder kind`, a pure value for incremental
+The third milestone adds `Builder kind`, a pure value for incremental
 construction. It stores pending elements in reverse source order, their cached
 count, and a stack of open node kinds and starting positions. A `Checkpoint`
 records a position in this pending forest, counting elements rather than bytes.
-`startNode` opens a node at the current end. `builderToken` appends exact text.
-`builderElement` appends an existing green element and reuses its cached length.
+`startNode` opens a node at the current end. `emitToken` appends exact text.
+`emitElement` appends an existing green element and reuses its cached length.
 
 `finishNode` removes the pending suffix belonging to the innermost node. It
 reverses that suffix into source order, constructs the node, and replaces the
@@ -175,7 +175,7 @@ position valid again, and an unrelated builder's marker can pass the same tests.
 Applications must use checkpoints with their corresponding construction history.
 
 Errors use `Either BuilderError`, replacing Rowan's assertions. `finishNode`
-rejects a builder with no open node. `finishBuilder` first rejects unclosed
+rejects a builder with no open node. `runBuilder` first rejects unclosed
 nodes, then requires exactly one completed root node. This explicit balance
 check is stricter than Rowan's final forest check. Finishing never closes nodes
 implicitly, and a failed operation leaves the input value available.

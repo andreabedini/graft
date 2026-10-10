@@ -44,9 +44,9 @@ wideBench size = bgroup (show size)
   , env (pure (Prepared (Node (wideTree (wideSource size))))) $ \prepared ->
       let tree = preparedTree prepared
           node = case tree of Node value -> value; Token _ -> error "expected node"
-          root = newCursor tree
+          root = rootCursor tree
           replacement = Token (greenToken Number (Text.singleton '2'))
-          endAt index input = cursorEnd (checked (childAt index (newCursor input)))
+          endAt index input = cursorEnd (checked (cursorChildAt index (rootCursor input)))
           replace index input = elementTextLength (checked (replaceAt [index] replacement input))
       in bgroup "prepared"
         [ bench "render" $ nf renderElement tree
@@ -55,10 +55,10 @@ wideBench size = bgroup (show size)
         , bench "child-first" $ whnf (endAt 0) tree
         , bench "child-middle" $ whnf (endAt (size `div` 2)) tree
         , bench "child-last" $ whnf (endAt (size - 1)) tree
-        , bench "siblings" $ whnf (siblingSum . newCursor) tree
-        , bench "offset-last" $ whnf (offsetEnd (nodeTextLength node - 1) . newCursor) tree
+        , bench "siblings" $ whnf (siblingSum . rootCursor) tree
+        , bench "offset-last" $ whnf (offsetEnd (nodeTextLength node - 1) . rootCursor) tree
         , bench "cover-last" $ whnf (cursorEnd . selected . coveringElement
-            (rangeFromLength (nodeTextLength node - 1) 1) . newCursor) tree
+            (rangeFromLength (nodeTextLength node - 1) 1) . rootCursor) tree
         , bench "replace-first" $ whnf (replace 0) tree
         , bench "replace-middle" $ whnf (replace (size `div` 2)) tree
         , bench "replace-last" $ whnf (replace (size - 1)) tree
@@ -79,17 +79,17 @@ deepBench depth = bgroup (show depth)
   , env (pure (Prepared (Node (deepTree depth)))) $ \prepared ->
       let tree = preparedTree prepared
           path = replicate (depth + 1) 0
-          focused input = checked (cursorAt path (newCursor input))
+          focused input = checked (cursorAt path (rootCursor input))
           replacement = Token (greenToken Number (Text.singleton '2'))
       in bgroup "prepared"
         [ bench "render" $ nf renderElement tree
         , bench "descend" $ whnf (cursorEnd . focused) tree
         , bench "replace-path" $ whnf (elementTextLength . checked . replaceAt path replacement) tree
-        , bench "offset" $ whnf (offsetEnd 1 . newCursor) tree
+        , bench "offset" $ whnf (offsetEnd 1 . rootCursor) tree
         , bench "focus-and-replace" $ whnf (elementTextLength . replaceFocus replacement . focused) tree
         ]
   , env (pure (PreparedCursor (checked (cursorAt (replicate (depth + 1) 0)
-      (newCursor (Node (deepTree depth))))))) $ \prepared -> bgroup "focused"
+      (rootCursor (Node (deepTree depth))))))) $ \prepared -> bgroup "focused"
       [ bench "replace" $ whnf (elementTextLength . replaceFocus
           (Token (greenToken Number (Text.singleton '2')))) (preparedCursor prepared)
       , bench "root" $ whnf (cursorEnd . cursorRoot) (preparedCursor prepared)
@@ -100,11 +100,11 @@ documentBench :: Benchmark
 documentBench = env (pure (Prepared (Node (documentTree 1000)))) $ \prepared ->
   let tree = preparedTree prepared
       path = [499, 2]
-      root = newCursor tree
+      root = rootCursor tree
   in bgroup "document-1000"
     [ bench "construct" $ whnf (cached . documentTree) 1000
     , bench "render" $ nf renderElement tree
-    , bench "tokens" $ whnf (List.foldl' (\total cursor -> total + cursorEnd cursor) 0 . tokens . newCursor) tree
+    , bench "tokens" $ whnf (List.foldl' (\total cursor -> total + cursorEnd cursor) 0 . cursorTokens . rootCursor) tree
     , bench "typed-first-group" $ whnf (maybe 0 (cursorEnd . nodeSyntax) .
         (astChild :: Cursor Kind -> Maybe Grouped)) root
     , bench "typed-all-groups" $ whnf (List.foldl' (\total view -> total + cursorEnd (nodeSyntax view)) 0 .

@@ -4,7 +4,7 @@ module ChildEditTests (childEditProperties) where
 
 import Data.List (isPrefixOf)
 import qualified Data.Text as Text
-import Graft hiding (children)
+import Graft
 import Test.QuickCheck
 import TestModel
 
@@ -38,7 +38,7 @@ matches expected result = case result of
     , Text.unpack (renderElement edited) === source expected
     , counterexample "cache invariant" (validCaches edited)
     , conjoin
-        [ case cursorAt path (newCursor edited) of
+        [ case cursorAt path (rootCursor edited) of
             Left err -> counterexample (show (path, err)) False
             Right focus -> conjoin
               [ cursorGreen focus === compile selected
@@ -85,7 +85,7 @@ propNestedSplice = forAll (genTarget False) $ \(model, path, kind, items) ->
     let root = compile model
         expected = modelReplace path (Branch kind (take start items ++ replacements ++ drop end items)) model
         edited = spliceChildrenAt path start end (map compile replacements) root
-    in classify (not (null path)) "nested node" $ case cursorAt path (newCursor root) of
+    in classify (not (null path)) "nested node" $ case cursorAt path (rootCursor root) of
       Left err -> counterexample (show err) False
       Right focus -> conjoin
         [ matches expected edited
@@ -119,7 +119,7 @@ propInsertion = forAll (genTarget False) $ \(model, path, kind, items) ->
         , matches (modelReplace path updated model) edited
         , (direct >>= removeChild index) === Right (asNode target)
         , (edited >>= removeChildAt path index) === Right root
-        , case cursorAt path (newCursor root) of
+        , case cursorAt path (rootCursor root) of
             Left err -> counterexample (show err) False
             Right focus -> insertChildFocus index element focus === edited
         ]
@@ -136,7 +136,7 @@ propRemoval = forAll (genTarget True) $ \(model, path, kind, items) ->
       [ matches updated (Node <$> direct)
       , matches (modelReplace path updated model) edited
       , (direct >>= insertChild index (compile (items !! index))) === Right (asNode target)
-      , case cursorAt path (newCursor root) of
+      , case cursorAt path (rootCursor root) of
           Left err -> counterexample (show err) False
           Right focus -> removeChildFocus index focus === edited
       ]
@@ -166,7 +166,7 @@ propInvalidBounds = forAll (genTarget False) $ \(model, path, kind, items) ->
     [ conjoin
         [ spliceChildren start end [] node === Left err
         , spliceChildrenAt path start end [] root === Left err
-        , case cursorAt path (newCursor root) of
+        , case cursorAt path (rootCursor root) of
             Left pathErr -> counterexample (show pathErr) False
             Right focus -> spliceChildrenFocus start end [] focus === Left err
         ]
@@ -185,7 +185,7 @@ propInvalidTargets model = conjoin
         [ spliceChildrenAt path (-1) (-2) [] root === Left CannotEditTokenChildren
         , insertChildAt path (-1) root root === Left CannotEditTokenChildren
         , removeChildAt path (-1) root === Left CannotEditTokenChildren
-        , case cursorAt path (newCursor root) of
+        , case cursorAt path (rootCursor root) of
             Left err -> counterexample (show err) False
             Right focus -> conjoin
               [ spliceChildrenFocus (-1) (-2) [] focus === Left CannotEditTokenChildren
@@ -224,13 +224,13 @@ regressions = once $ conjoin
   , spliceChildren minBound maxBound [] empty === Left (NegativeChildBoundary minBound)
   , conjoin
       [ elementTextLength hugeEdited === 2 ^ (40 :: Int) + 1
-      , case cursorAt [1] (newCursor hugeEdited) of
+      , case cursorAt [1] (rootCursor hugeEdited) of
           Left err -> counterexample (show err) False
           Right focus -> cursorRange focus === rangeFromLength (2 ^ (40 :: Int)) 1
       ]
   , case insertChild 0 (Node empty) (greenNode Root [tok "x"]) of
       Left err -> counterexample (show err) False
-      Right node -> case cursorAt [1] (newCursor (Node node)) of
+      Right node -> case cursorAt [1] (rootCursor (Node node)) of
         Left err -> counterexample (show err) False
         Right focus -> conjoin [cursorPath focus === [1], cursorRange focus === rangeFromLength 0 1]
   ]

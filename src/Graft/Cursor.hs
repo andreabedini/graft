@@ -3,27 +3,27 @@
 -- Navigation does not edit or rebuild green nodes. No pointer identity is exposed.
 module Graft.Cursor
   ( Cursor
-  , newCursor
+  , rootCursor
   , cursorGreen
   , cursorKind
   , cursorRange
   , cursorPath
   , cursorRoot
   , cursorAt
-  , parent
-  , childAt
-  , firstChild
-  , lastChild
-  , nextSibling
-  , previousSibling
-  , children
-  , ancestors
-  , descendants
-  , tokens
-  , firstToken
-  , lastToken
-  , nextToken
-  , previousToken
+  , cursorParent
+  , cursorChildAt
+  , cursorFirstChild
+  , cursorLastChild
+  , cursorNextSibling
+  , cursorPreviousSibling
+  , cursorChildren
+  , cursorAncestors
+  , cursorDescendants
+  , cursorTokens
+  , cursorFirstToken
+  , cursorLastToken
+  , cursorNextToken
+  , cursorPreviousToken
   , TokenAtOffset (..)
   , tokenAtOffset
   , coveringElement
@@ -57,8 +57,8 @@ instance Show kind => Show (Cursor kind) where
       . shows (cursorRange cursor) . showChar ' ' . shows (cursorGreen cursor)
 
 -- | Focus a green root at byte offset zero. A token root is allowed.
-newCursor :: GreenElement kind -> Cursor kind
-newCursor green = Cursor green 0 Nothing
+rootCursor :: GreenElement kind -> Cursor kind
+rootCursor green = Cursor green 0 Nothing
 
 -- | The original green element at the focus, without copying it.
 cursorGreen :: Cursor kind -> GreenElement kind
@@ -81,25 +81,25 @@ cursorPath (Cursor _ _ context) = go context []
     go (Just (Crumb _ _ above index _ _)) path = go above (index : path)
 
 -- | Restore the original parent in constant time. The root has no parent.
-parent :: Cursor kind -> Maybe (Cursor kind)
-parent (Cursor _ _ Nothing) = Nothing
-parent (Cursor _ _ (Just (Crumb node offset above _ _ _))) =
+cursorParent :: Cursor kind -> Maybe (Cursor kind)
+cursorParent (Cursor _ _ Nothing) = Nothing
+cursorParent (Cursor _ _ (Just (Crumb node offset above _ _ _))) =
   Just (Cursor (Node node) offset above)
 
 -- | Ascend to the snapshot's root without rebuilding it.
 cursorRoot :: Cursor kind -> Cursor kind
-cursorRoot cursor = maybe cursor cursorRoot (parent cursor)
+cursorRoot cursor = maybe cursor cursorRoot (cursorParent cursor)
 
 -- | Follow a path relative to the current focus. Validation matches
 -- 'Graft.Edit.elementAt', including negative-index precedence.
 cursorAt :: Path -> Cursor kind -> Either PathError (Cursor kind)
 cursorAt [] cursor = Right cursor
-cursorAt (index : rest) cursor = childAt index cursor >>= cursorAt rest
+cursorAt (index : rest) cursor = cursorChildAt index cursor >>= cursorAt rest
 
 -- | Focus a zero-based immediate child. Scans preceding siblings and sums
 -- their cached byte lengths; it does not traverse their descendants.
-childAt :: Int -> Cursor kind -> Either PathError (Cursor kind)
-childAt index (Cursor green offset above)
+cursorChildAt :: Int -> Cursor kind -> Either PathError (Cursor kind)
+cursorChildAt index (Cursor green offset above)
   | index < 0 = Left (NegativeChildIndex index)
   | otherwise = case green of
       Token _ -> Left CannotDescendIntoToken
@@ -112,46 +112,46 @@ childAt index (Cursor green offset above)
       go node (remaining - 1) (start + elementTextLength child) (child : before) after
 
 -- | First immediate child, including tokens and zero-length elements.
-firstChild :: Cursor kind -> Maybe (Cursor kind)
-firstChild = either (const Nothing) Just . childAt 0
+cursorFirstChild :: Cursor kind -> Maybe (Cursor kind)
+cursorFirstChild = either (const Nothing) Just . cursorChildAt 0
 
 -- | Last immediate child. Scans the child list once.
-lastChild :: Cursor kind -> Maybe (Cursor kind)
-lastChild cursor = firstChild cursor >>= Just . go
+cursorLastChild :: Cursor kind -> Maybe (Cursor kind)
+cursorLastChild cursor = go <$> cursorFirstChild cursor
   where
-    go child = maybe child go (nextSibling child)
+    go child = maybe child go (cursorNextSibling child)
 
 -- | Following sibling in constant time, including empty elements.
-nextSibling :: Cursor kind -> Maybe (Cursor kind)
-nextSibling (Cursor green offset (Just (Crumb node start above index before (next : after)))) =
+cursorNextSibling :: Cursor kind -> Maybe (Cursor kind)
+cursorNextSibling (Cursor green offset (Just (Crumb node start above index before (next : after)))) =
   Just (Cursor next (offset + elementTextLength green)
     (Just (Crumb node start above (index + 1) (green : before) after)))
-nextSibling _ = Nothing
+cursorNextSibling _ = Nothing
 
 -- | Preceding sibling in constant time, including empty elements.
-previousSibling :: Cursor kind -> Maybe (Cursor kind)
-previousSibling (Cursor green offset (Just (Crumb node start above index (previous : before) after))) =
+cursorPreviousSibling :: Cursor kind -> Maybe (Cursor kind)
+cursorPreviousSibling (Cursor green offset (Just (Crumb node start above index (previous : before) after))) =
   Just (Cursor previous (offset - elementTextLength previous)
     (Just (Crumb node start above (index - 1) before (green : after))))
-previousSibling _ = Nothing
+cursorPreviousSibling _ = Nothing
 
 -- | Immediate children in source order. A token has no children.
-children :: Cursor kind -> [Cursor kind]
-children = unfold nextSibling . firstChild
+cursorChildren :: Cursor kind -> [Cursor kind]
+cursorChildren = unfold cursorNextSibling . cursorFirstChild
 
 -- | The focus followed by its parents, nearest first.
-ancestors :: Cursor kind -> [Cursor kind]
-ancestors = unfold parent . Just
+cursorAncestors :: Cursor kind -> [Cursor kind]
+cursorAncestors = unfold cursorParent . Just
 
 -- | Preorder traversal including the focus, every node, and every token.
 -- Shared green values are visited once per occurrence. Results are lazy.
-descendants :: Cursor kind -> [Cursor kind]
-descendants cursor = cursor : concatMap descendants (children cursor)
+cursorDescendants :: Cursor kind -> [Cursor kind]
+cursorDescendants cursor = cursor : concatMap cursorDescendants (cursorChildren cursor)
 
 -- | All token occurrences in this subtree in source order, including empty
 -- tokens and trivia. Does not include tokens outside the focus.
-tokens :: Cursor kind -> [Cursor kind]
-tokens = filter isToken . descendants
+cursorTokens :: Cursor kind -> [Cursor kind]
+cursorTokens = filter isToken . cursorDescendants
   where
     isToken cursor = case cursorGreen cursor of
       Token _ -> True
@@ -159,29 +159,29 @@ tokens = filter isToken . descendants
 
 -- | First token in this subtree, skipping tokenless nodes. A token focus
 -- returns itself, even when its text is empty.
-firstToken :: Cursor kind -> Maybe (Cursor kind)
-firstToken cursor = case cursorGreen cursor of
+cursorFirstToken :: Cursor kind -> Maybe (Cursor kind)
+cursorFirstToken cursor = case cursorGreen cursor of
   Token _ -> Just cursor
-  Node _ -> firstChild cursor >>= seek firstToken nextSibling
+  Node _ -> cursorFirstChild cursor >>= seek cursorFirstToken cursorNextSibling
 
 -- | Last token in this subtree, skipping tokenless nodes.
-lastToken :: Cursor kind -> Maybe (Cursor kind)
-lastToken cursor = case cursorGreen cursor of
+cursorLastToken :: Cursor kind -> Maybe (Cursor kind)
+cursorLastToken cursor = case cursorGreen cursor of
   Token _ -> Just cursor
-  Node _ -> lastChild cursor >>= seek lastToken previousSibling
+  Node _ -> cursorLastChild cursor >>= seek cursorLastToken cursorPreviousSibling
 
 -- | First token after the entire focused subtree in the snapshot, ascending
 -- as needed. Includes empty tokens; from a token, moves to the next token.
-nextToken :: Cursor kind -> Maybe (Cursor kind)
-nextToken cursor =
-  (nextSibling cursor >>= seek firstToken nextSibling)
-    <|> (parent cursor >>= nextToken)
+cursorNextToken :: Cursor kind -> Maybe (Cursor kind)
+cursorNextToken cursor =
+  (cursorNextSibling cursor >>= seek cursorFirstToken cursorNextSibling)
+    <|> (cursorParent cursor >>= cursorNextToken)
 
 -- | Last token before the entire focused subtree in the snapshot.
-previousToken :: Cursor kind -> Maybe (Cursor kind)
-previousToken cursor =
-  (previousSibling cursor >>= seek lastToken previousSibling)
-    <|> (parent cursor >>= previousToken)
+cursorPreviousToken :: Cursor kind -> Maybe (Cursor kind)
+cursorPreviousToken cursor =
+  (cursorPreviousSibling cursor >>= seek cursorLastToken cursorPreviousSibling)
+    <|> (cursorParent cursor >>= cursorPreviousToken)
 
 -- | Offset lookup is unambiguous inside a token and may select both tokens
 -- at a shared boundary. The pair is ordered left to right.
@@ -204,7 +204,7 @@ tokenAtOffset offset cursor = case matching cursor of
       | rangeIsEmpty range || offset < rangeStart range || offset > rangeEnd range = []
       | otherwise = case cursorGreen current of
           Token _ -> [current]
-          Node _ -> concatMap matching (children current)
+          Node _ -> concatMap matching (cursorChildren current)
       where
         range = cursorRange current
 
@@ -215,7 +215,7 @@ tokenAtOffset offset cursor = case matching cursor of
 coveringElement :: TextRange -> Cursor kind -> Maybe (Cursor kind)
 coveringElement query cursor
   | not (rangeContainsRange (cursorRange cursor) query) = Nothing
-  | otherwise = case find (\child -> rangeContainsRange (cursorRange child) query) (children cursor) of
+  | otherwise = case find (\child -> rangeContainsRange (cursorRange child) query) (cursorChildren cursor) of
       Nothing -> Just cursor
       Just child -> coveringElement query child
 

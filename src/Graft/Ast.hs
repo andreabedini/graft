@@ -76,20 +76,20 @@ astChild = listToMaybe . astChildren
 -- are skipped. A token focus returns an empty list. Results are lazy and keep
 -- each occurrence's original cursor; repeated green subtrees remain distinct.
 astChildren :: AstNode ast => Cursor (AstNodeKind ast) -> [ast]
-astChildren = mapMaybe castNode . filter isNode . children
+astChildren = mapMaybe castNode . filter isNode . cursorChildren
 
 -- | Cast only the immediate parent to the requested node view. Does not skip
 -- a mismatched parent to search higher ancestors. A root returns 'Nothing'.
 -- Works from either a node or a token cursor.
 astParent :: AstNode ast => Cursor (AstNodeKind ast) -> Maybe ast
-astParent cursor = parent cursor >>= castNode
+astParent cursor = cursorParent cursor >>= castNode
 
 -- | Matching ancestors, nearest first, excluding the focus. Skips failed casts
 -- and retains their original context. Results are lazy; the root returns @[]@.
 astAncestors :: AstNode ast => Cursor (AstNodeKind ast) -> [ast]
-astAncestors cursor = case parent cursor of
+astAncestors cursor = case cursorParent cursor of
   Nothing -> []
-  Just above -> mapMaybe castNode (ancestors above)
+  Just above -> mapMaybe castNode (cursorAncestors above)
 
 -- | First matching immediate token child, including empty tokens. Does not
 -- search inside child nodes. Stops when the first cast succeeds.
@@ -99,7 +99,7 @@ astToken = listToMaybe . astTokens
 -- | Matching immediate token children in source order, skipping nodes and
 -- failed casts. A token focus returns @[]@ rather than itself. Results are lazy.
 astTokens :: AstToken ast => Cursor (AstTokenKind ast) -> [ast]
-astTokens = mapMaybe castToken . filter (not . isNode) . children
+astTokens = mapMaybe castToken . filter (not . isNode) . cursorChildren
 
 isNode :: Cursor kind -> Bool
 isNode cursor = case cursorGreen cursor of

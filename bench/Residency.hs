@@ -37,8 +37,8 @@ prepare scenario size edits = do
         "tree" -> pure (Roots [root])
         "latest" -> evaluated (Roots [editMany edits path root])
         "history" -> evaluated (Roots (snapshots edits path root))
-        "cursor" -> pure (Focus (checked (cursorAt path (newCursor root))))
-        "detached-token" -> pure (Roots [cursorGreen (checked (cursorAt path (newCursor root)))])
+        "cursor" -> pure (Focus (checked (cursorAt path (rootCursor root))))
+        "detached-token" -> pure (Roots [cursorGreen (checked (cursorAt path (rootCursor root)))])
         _ -> error "scenario must be tree, shared, latest, history, cursor or detached-token"
   where
     evaluated retained = evaluate (observe retained) >> pure retained

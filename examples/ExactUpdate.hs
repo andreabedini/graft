@@ -43,7 +43,7 @@ setNumberValue value literal = do
 
 updateValue :: Integer -> GreenElement Kind -> Maybe (GreenElement Kind)
 updateValue value root = do
-  expression <- astChild (newCursor root)
+  expression <- astChild (rootCursor root)
   literal <- expressionNumber expression
   setNumberValue value literal
 
