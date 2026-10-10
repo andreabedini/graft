@@ -1,0 +1,11 @@
+Graft is an idiomatic Haskell port of the core ideas in Rowan, developed by
+the rust-analyzer project: https://github.com/rust-analyzer/rowan
+
+The initial implementation was written in Haskell after studying Rowan's
+green trees, cursor editing, builders, cache, and tests at revision
+b6f1cb6494a99a2264186d110b1b170989774814 (version 0.17.0 in Cargo.toml),
+retrieved on 2026-10-10. Graft is not affiliated with the Rowan project.
+
+Rowan is available under MIT OR Apache-2.0. Its MIT permission notice is
+preserved verbatim in licenses/ROWAN-MIT. Graft's own code is MIT licensed;
+see LICENSE.
