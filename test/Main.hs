@@ -5,6 +5,7 @@ module Main (main) where
 import AstTests (astProperties)
 import BuilderTests (builderProperties)
 import ChildEditTests (childEditProperties)
+import LineIndexTests (lineIndexProperties)
 import Control.Monad (unless)
 import Data.List (find, isPrefixOf)
 import qualified Data.Text as Text
@@ -477,7 +478,7 @@ main = do
     , run "covering range lookup" propCoveringRange
     , run "half-open range invariants" propRanges
     , run "cursor empty, boundary, shared-occurrence and large-range regressions" cursorRegressions
-    ] ++ [run title prop | (title, prop) <- builderProperties ++ childEditProperties ++ astProperties]
+    ] ++ [run title prop | (title, prop) <- builderProperties ++ childEditProperties ++ astProperties ++ lineIndexProperties]
   unless (all isSuccess results) exitFailure
   where
     run title prop = do

@@ -6,6 +6,7 @@ module Graft
   , module Graft.Cursor
   , module Graft.Builder
   , module Graft.Ast
+  , module Graft.LineIndex
   ) where
 
 import Graft.Ast
@@ -13,4 +14,5 @@ import Graft.Builder
 import Graft.Cursor
 import Graft.Edit
 import Graft.Green
+import Graft.LineIndex
 import Graft.Range

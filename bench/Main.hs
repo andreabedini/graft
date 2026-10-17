@@ -18,7 +18,7 @@ main = do
     ["--check"] -> checkFixtures
     ["--residency", scenario, size, edits] ->
       case (readMaybe size, readMaybe edits) of
-        (Just lineCount, Just editCount) -> runResidency scenario lineCount editCount
+        (Just documentLines, Just editCount) -> runResidency scenario documentLines editCount
         _ -> error "residency size and edits must be integers"
     _ -> defaultMain
       [ bgroup "token" [tokenBench bytes | bytes <- [32, 4096]]
