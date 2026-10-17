@@ -11,6 +11,19 @@ where an abstract syntax tree keeps only its meaning. Graft stores such trees,
 navigates them, edits them persistently and prints them back. Lexing, parsing,
 grammar validation and formatting policy belong to the application.
 
+## Modules and names
+
+Each module covers one concept, and its functions have short names meant for
+qualified import: `Cursor.parent`, `Green.node`, `Range.start`, `Build.token`.
+The same short name can appear in several modules, such as `children` in
+`Graft.Green`, `Graft.Cursor` and `Graft.Ast`, each acting on its own module's
+type. The `Graft` module exports only the types and classes, so that they can
+be used unqualified alongside the qualified functions.
+
+Edits inside a tree go through a cursor. `Graft.Green` edits only the
+children of a single node, and `Graft.Cursor` rebuilds the ancestors; there is
+no separate set of edits addressed by path.
+
 ## Green trees
 
 A green token is a leaf with a syntax kind and exact `Text`. A green node has a
@@ -21,7 +34,7 @@ any number of times.
 
 Green values have no parents and no absolute positions, so a subtree can be
 shared between trees and between versions of one tree. Their constructors are
-hidden, and the smart constructors `greenNode` and `greenToken` establish the
+hidden, and the smart constructors `Green.node` and `Green.token` establish the
 cached lengths. The representation lives in `Graft.Green.Internal`, which the
 package does not expose.
 
@@ -78,13 +91,13 @@ chain of contexts: for each ancestor, the parent node, the parent's offset, and
 the focus's index in it. Moving down, up or sideways is constant time, and the
 cursor computes absolute ranges from the cached child offsets.
 
-A cursor also records whether its focus has been replaced. `replaceFocus`
+A cursor also records whether its focus has been replaced. `Cursor.replace`
 doesn't rebuild anything; it returns a cursor with the new focus and that flag
 set. The parent is rebuilt when the cursor next moves up or sideways, and the
 rebuilt parent is marked as replaced in turn. So a run of edits in one region,
 such as renaming every token in a list, rebuilds each ancestor once rather than
 once per edit, and the cursor stays usable for navigation throughout.
-`cursorTree` climbs to the root and returns the edited tree.
+`Cursor.tree` climbs to the root and returns the edited tree.
 
 Edits are persistent. The cursor you started with still sees the original tree,
 and so does every cursor derived from it before the edit. Paths and byte ranges
@@ -103,14 +116,14 @@ working after an edit, without shared mutable state.
 `TextRange` is a half-open interval of byte offsets with validated endpoints.
 Offsets need not lie on character boundaries.
 
-`tokenAtOffset` treats token ranges as closed when deciding what an offset
+`Cursor.tokenAt` treats token ranges as closed when deciding what an offset
 touches. An offset inside a token returns that token. An offset on the boundary
 between two tokens returns both, left first, as an editor needs at a cursor
 position between two words. The start and end of the text return the first and
 last token. Empty tokens are skipped by this lookup, though navigation still
 visits them.
 
-`coveringElement` returns the innermost element whose range contains a query
+`Cursor.covering` returns the innermost element whose range contains a query
 range, descending into the first covering child at each level. An empty query
 on a boundary therefore picks the leftmost candidate, including empty
 elements. These rules are Graft's own and may differ from Rowan's tie-breaking.
@@ -120,7 +133,7 @@ elements. These rules are Graft's own and may differ from Rowan's tie-breaking.
 A builder holds the elements emitted so far, in reverse order, and a stack of
 open nodes with the position where each started. Closing a node collects the
 elements emitted since its start into a node. A checkpoint is a position in
-that sequence, counted in elements; `startNodeAt` opens a node at an earlier
+that sequence, counted in elements; `Builder.startNodeAt` opens a node at an earlier
 checkpoint, so a parser can wrap an operand after seeing the operator that
 follows it.
 
@@ -130,11 +143,12 @@ valid again after more elements are emitted. The builder checks only that the
 position lies within the current node.
 
 Rowan's builder asserts on misuse. Graft's pure builder returns
-`Either BuilderError` from every operation that can fail, and `runBuilder`
+`Either BuilderError` from every operation that can fail, and `Builder.finish`
 checks that every node was closed and that exactly one root node remains. The
-`Build` monad threads the builder and the errors, and its `buildNode` and
-`buildNodeAt` bracket a node so that it can't be left open. `saveBuilder` and
-`restoreBuilder` give backtracking parsers the persistence of the pure builder.
+`Build` monad in `Graft.Build` threads the builder and the errors, and its
+`Build.node` and `Build.nodeAt` bracket a node so that it can't be left open.
+`Build.save` and `Build.restore` give backtracking parsers the persistence of
+the pure builder.
 
 ## Typed views
 
@@ -149,7 +163,7 @@ expression with a missing operand still exists, and its accessor for that
 operand returns `Nothing`. Required fields, duplicates and token spelling are
 the application's to check. The classes have laws (a cast keeps the cursor,
 and casting a view's syntax succeeds again) that the type system can't
-enforce; `matchNode` and `matchToken` implement the usual instance.
+enforce; `Ast.matchNode` and `Ast.matchToken` implement the usual instance.
 
 `examples/ExactUpdate.hs` uses views for a semantic update: it reads a number's
 value, keeps the original token when the value is unchanged, so `001` stays
@@ -167,7 +181,8 @@ after an edit.
 ## Testing
 
 The tests compare the library with independent models that share none of its
-code; [CONTRIBUTING.md](../CONTRIBUTING.md) describes them. The benchmark suite
+code, and a doctest suite checks the examples in the Haddock documentation;
+[CONTRIBUTING.md](../CONTRIBUTING.md) describes both. The benchmark suite
 and its latest results are in [performance.md](performance.md).
 
 ## Relation to Rowan
@@ -194,13 +209,15 @@ and [formatting][tidy] tests.
 ## Open questions
 
 - Interning: whether a node cache pays for itself depends on duplicate rates in
-  real parser output, which haven't been measured.
+  real parser output. The first user, haskott (a Haskell reimplementation of
+  Ott), will provide the measurements.
 - Location handles: an equivalent of Rowan's `SyntaxNodePtr`, which finds an
   element again in a new version of the tree, needs rules for empty and nested
   elements that share a range.
 - Trivia ownership, and how close to Rowan's API Graft should stay.
 - Incremental reparsing: Graft can splice a reparsed subtree into a tree, but
-  has no support for deciding which subtree to reparse after a text edit.
+  has no support for deciding which subtree to reparse after a text edit. This
+  is a likely follow-up.
 
 [node]: https://github.com/rust-analyzer/rowan/blob/b6f1cb6494a99a2264186d110b1b170989774814/src/green/node.rs
 [token]: https://github.com/rust-analyzer/rowan/blob/b6f1cb6494a99a2264186d110b1b170989774814/src/green/token.rs

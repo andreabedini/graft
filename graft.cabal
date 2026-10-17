@@ -35,7 +35,7 @@ common warnings
 
 library
     import:           warnings
-    exposed-modules:  Graft Graft.Green Graft.Edit Graft.Range Graft.Cursor Graft.Builder Graft.Ast Graft.LineIndex
+    exposed-modules:  Graft Graft.Green Graft.Range Graft.Cursor Graft.Builder Graft.Build Graft.Ast Graft.LineIndex
     other-modules:    Graft.Green.Internal
     build-depends:
         base >=4.19 && <4.23,

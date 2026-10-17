@@ -58,7 +58,7 @@ textLengthOf :: Text -> TextLength
 textLengthOf = TextLength . Text.lengthWord8
 
 -- | An interior node: a kind and its children in source order. Construct one
--- with 'greenNode'. A node caches its total length and the offset of each
+-- with 'Graft.Green.node'. A node caches its total length and the offset of each
 -- child, so reading a length or a child takes constant time.
 data GreenNode kind = GreenNode
   !kind
@@ -67,7 +67,7 @@ data GreenNode kind = GreenNode
   !(PrimArray Int)
 
 -- | A leaf: a kind and the exact text of a source fragment, which may be
--- empty. Construct one with 'greenToken'. Text is stored as given, with no
+-- empty. Construct one with 'Graft.Green.token'. Text is stored as given, with no
 -- normalization.
 data GreenToken kind = GreenToken !kind !TextLength {-# UNPACK #-} !Text
   deriving (Eq)
@@ -127,12 +127,12 @@ instance Functor GreenElement where
 -- | Shows the smart-constructor call that rebuilds the node.
 instance Show kind => Show (GreenNode kind) where
   showsPrec precedence (GreenNode kind _ children _) = showParen (precedence > 10) $
-    showString "greenNode " . showsPrec 11 kind . showChar ' ' . shows (toList children)
+    showString "Green.node " . showsPrec 11 kind . showChar ' ' . shows (toList children)
 
 -- | Shows the smart-constructor call that rebuilds the token.
 instance Show kind => Show (GreenToken kind) where
   showsPrec precedence (GreenToken kind _ text) = showParen (precedence > 10) $
-    showString "greenToken " . showsPrec 11 kind . showChar ' ' . showsPrec 11 text
+    showString "Green.token " . showsPrec 11 kind . showChar ' ' . showsPrec 11 text
 
 -- | A node with a kind and its children in source order, which may be none.
 -- Takes time proportional to the number of children; the children are

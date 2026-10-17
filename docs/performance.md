@@ -157,7 +157,7 @@ Two changes followed the 2026-10-17 run:
   as well saved only a further 3% of heap and made replacements about 45%
   slower, because cursors had to re-allocate the parent node on every
   descent, so nodes stay boxed.
-- **Single-pass `finishNode`.** Closing a node now fills the node while walking
+- **Single-pass `Builder.finishNode`.** Closing a node now fills the node while walking
   the pending elements, instead of splitting the list first and copying it.
   Even on the busy machine, building 10,000 tokens took 158–176 µs, against
   476–483 µs in the 2026-10-17 run.

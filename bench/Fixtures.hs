@@ -13,10 +13,16 @@ module Fixtures
 import Control.DeepSeq (NFData (..))
 import Control.Exception (evaluate)
 import Control.Monad (unless)
-import qualified Data.Text as Text
-import Data.Text (Text)
-import Graft
 import qualified Data.List as List
+import Data.Text (Text)
+import qualified Data.Text as Text
+import Graft
+import qualified Graft.Ast as Ast
+import qualified Graft.Build as Build
+import qualified Graft.Builder as Builder
+import qualified Graft.Cursor as Cursor
+import qualified Graft.Green as Green
+import qualified Graft.Range as Range
 
 data Kind = Root | Group | Name | Number | Trivia
   deriving (Eq, Show)
@@ -41,44 +47,44 @@ forceElement = rnf
 newtype Named = Named (Cursor Kind)
 instance AstToken Named where
   type AstTokenKind Named = Kind
-  castToken = matchToken (== Name) Named
+  castToken = Ast.matchToken (== Name) Named
   tokenSyntax (Named cursor) = cursor
 
 newtype Numbered = Numbered (Cursor Kind)
 instance AstToken Numbered where
   type AstTokenKind Numbered = Kind
-  castToken = matchToken (== Number) Numbered
+  castToken = Ast.matchToken (== Number) Numbered
   tokenSyntax (Numbered cursor) = cursor
 
 newtype Grouped = Grouped (Cursor Kind)
 instance AstNode Grouped where
   type AstNodeKind Grouped = Kind
-  castNode = matchNode (== Group) Grouped
+  castNode = Ast.matchNode (== Group) Grouped
   nodeSyntax (Grouped cursor) = cursor
 
 wideSource :: Int -> [Text]
 wideSource count = [Text.pack ("名" ++ show index ++ " ") | index <- [1 .. count]]
 
 wideTree :: [Text] -> GreenNode Kind
-wideTree = greenNode Root . wideElements
+wideTree = Green.node Root . wideElements
 
 wideElements :: [Text] -> [GreenElement Kind]
 wideElements [] = []
-wideElements [text] = [Token (greenToken Number text)]
-wideElements (text : rest) = Token (greenToken Name text) : wideElements rest
+wideElements [text] = [Token (Green.token Number text)]
+wideElements (text : rest) = Token (Green.token Name text) : wideElements rest
 
 deepTree :: Int -> GreenNode Kind
-deepTree depth = List.foldl' (\node _ -> greenNode Group [Node node]) leaf [1 .. depth]
-  where leaf = greenNode Group [Token (greenToken Number "001")]
+deepTree depth = List.foldl' (\node _ -> Green.node Group [Node node]) leaf [1 .. depth]
+  where leaf = Green.node Group [Token (Green.token Number "001")]
 
 -- A left-nested operator chain such as @((0 + 1) + 2) + 3@: both deep and
 -- wide, so whole-tree traversals pay for every level on every token.
 chainTree :: Int -> GreenNode Kind
 chainTree count = List.foldl' step leaf [1 .. count]
   where
-    leaf = greenNode Group [Token (greenToken Number "0")]
-    step left index = greenNode Group
-      [Node left, Token (greenToken Trivia " + "), Token (greenToken Number (Text.pack (show index)))]
+    leaf = Green.node Group [Token (Green.token Number "0")]
+    step left index = Green.node Group
+      [Node left, Token (Green.token Trivia " + "), Token (Green.token Number (Text.pack (show index)))]
 
 chainSource :: Int -> Text
 chainSource count = Text.concat ("0" : [Text.pack (" + " ++ show index) | index <- [1 .. count]])
@@ -90,9 +96,9 @@ documentSource :: Int -> Text
 documentSource count = Text.concat (concatMap lineText [1 .. count])
 
 documentTree :: Int -> GreenNode Kind
-documentTree count = greenNode Root [Node (line index) | index <- [1 .. count]]
+documentTree count = Green.node Root [Node (line index) | index <- [1 .. count]]
   where
-    line index = greenNode Group (zipWith (\kind text -> Token (greenToken kind text))
+    line index = Green.node Group (zipWith (\kind text -> Token (Green.token kind text))
       [Name, Trivia, Number, Trivia, Trivia] (lineText index))
 
 checked :: Show err => Either err a -> a
@@ -102,47 +108,47 @@ selected :: Maybe a -> a
 selected = maybe (error "benchmark fixture has no selected element") id
 
 cached :: GreenNode Kind -> TextLength
-cached = nodeTextLength
+cached = Green.nodeLength
 
 cursorEnd :: Cursor Kind -> TextLength
-cursorEnd = rangeEnd . cursorRange
+cursorEnd = Range.end . Cursor.range
 
 -- A strict consumer: each adjacent sibling and range contributes to the result.
 siblingSum :: Cursor Kind -> TextLength
-siblingSum root = go 0 (cursorFirstChild root)
+siblingSum root = go 0 (Cursor.firstChild root)
   where
     go total Nothing = total
     go total (Just cursor) = let next = total + cursorEnd cursor
-      in next `seq` go next (cursorNextSibling cursor)
+      in next `seq` go next (Cursor.nextSibling cursor)
 
 buildTokens :: [Text] -> GreenNode Kind
-buildTokens texts = checked (runBuilder (checked (finishNode emitted)))
+buildTokens texts = checked (Builder.finish (checked (Builder.finishNode emitted)))
   where
-    emitted = go (startNode Root emptyBuilder) texts
+    emitted = go (Builder.startNode Root Builder.empty) texts
     go builder [] = builder
-    go builder [text] = emitToken Number text builder
-    go builder (text : rest) = let next = emitToken Name text builder
+    go builder [text] = Builder.token Number text builder
+    go builder (text : rest) = let next = Builder.token Name text builder
       in next `seq` go next rest
 
 buildMonadic :: [Text] -> GreenNode Kind
-buildMonadic texts = checked (execBuild (buildNode Root (go texts)))
+buildMonadic texts = checked (Build.exec (Build.node Root (go texts)))
   where
     go [] = pure ()
-    go [text] = buildToken Number text
-    go (text : rest) = buildToken Name text >> go rest
+    go [text] = Build.token Number text
+    go (text : rest) = Build.token Name text >> go rest
 
 buildReuse :: GreenNode Kind -> GreenNode Kind
-buildReuse node = checked (runBuilder (checked (finishNode emitted)))
-  where emitted = List.foldl' (flip emitElement) (startNode Root emptyBuilder) (nodeChildren node)
+buildReuse node = checked (Builder.finish (checked (Builder.finishNode emitted)))
+  where emitted = List.foldl' (flip Builder.element) (Builder.startNode Root Builder.empty) (Green.children node)
 
 buildWrapped :: GreenNode Kind -> GreenNode Kind
-buildWrapped node = checked (runBuilder closed)
+buildWrapped node = checked (Builder.finish closed)
   where
-    opened = startNode Root emptyBuilder
-    marker = checkpoint opened
-    emitted = List.foldl' (flip emitElement) opened (nodeChildren node)
-    wrapped = checked (startNodeAt marker Group emitted)
-    closed = checked (finishNode (checked (finishNode wrapped)))
+    opened = Builder.startNode Root Builder.empty
+    marker = Builder.checkpoint opened
+    emitted = List.foldl' (flip Builder.element) opened (Green.children node)
+    wrapped = checked (Builder.startNodeAt marker Group emitted)
+    closed = checked (Builder.finishNode (checked (Builder.finishNode wrapped)))
 
 -- Each edit depends on the preceding snapshot. Distinct text prevents no-op
 -- updates. Force the cache on every step without walking shared descendants.
@@ -150,17 +156,17 @@ editMany :: Int -> Path -> GreenElement Kind -> GreenElement Kind
 editMany count path root = List.foldl' step root [1 .. count]
   where
     step previous index =
-      let updated = cursorTree (replaceFocus (Token (greenToken Number (Text.pack (show index))))
-            (checked (cursorAt path (rootCursor previous))))
-      in elementTextLength updated `seq` updated
+      let updated = Cursor.tree (Cursor.replace (Token (Green.token Number (Text.pack (show index))))
+            (checked (Cursor.at path (Cursor.fromGreen previous))))
+      in Green.length updated `seq` updated
 
 snapshots :: Int -> Path -> GreenElement Kind -> [GreenElement Kind]
 snapshots count path root = scanl step root [1 .. count]
   where
     step previous index =
-      let updated = cursorTree (replaceFocus (Token (greenToken Number (Text.pack (show index))))
-            (checked (cursorAt path (rootCursor previous))))
-      in elementTextLength updated `seq` updated
+      let updated = Cursor.tree (Cursor.replace (Token (Green.token Number (Text.pack (show index))))
+            (checked (Cursor.at path (Cursor.fromGreen previous))))
+      in Green.length updated `seq` updated
 
 -- Independent source checks guard the workload, not timing thresholds.
 checkFixtures :: IO ()
@@ -171,16 +177,16 @@ checkFixtures = do
   let document = Node (documentTree 1000)
       before = documentSource 1000
       path = [499, 2]
-      cursor = checked (cursorAt path (rootCursor document))
+      cursor = checked (Cursor.at path (Cursor.fromGreen document))
       updated = editMany 100 path document
       expected = Text.concat [documentSource 499, Text.concat
         ["名500", "  = ", "100", " -- keep", "\r\n"],
         Text.concat (concatMap lineText [501 .. 1000])]
-  assert "document source" (renderElement document == before)
-  assert "repeated exact edits" (renderElement updated == expected)
-  assert "focus/path edit agreement" (cursorTree (replaceFocus (Token (greenToken Number "100")) cursor) == updated)
-  assert "original snapshot preserved" (renderElement document == before)
-  assert "typed groups" (length (astChildren (rootCursor document) :: [Grouped]) == 1000)
+  assert "document source" (Green.render document == before)
+  assert "repeated exact edits" (Green.render updated == expected)
+  assert "focus/path edit agreement" (Cursor.tree (Cursor.replace (Token (Green.token Number "100")) cursor) == updated)
+  assert "original snapshot preserved" (Green.render document == before)
+  assert "typed groups" (length (Ast.children (Cursor.fromGreen document) :: [Grouped]) == 1000)
   assert "history count" (length (snapshots 100 path document) == 101)
   putStrLn "Benchmark fixtures and observations: PASS"
   where
@@ -188,38 +194,38 @@ checkFixtures = do
     checkWide count = do
       let texts = wideSource count
           node = wideTree texts
-          root = rootCursor (Node node)
-          insertion = Token (greenToken Number "NEW")
-          inserted = checked (spliceChildren (count `div` 2) (count `div` 2) [insertion] node)
+          root = Cursor.fromGreen (Node node)
+          insertion = Token (Green.token Number "NEW")
+          inserted = checked (Green.spliceChildren (count `div` 2) (count `div` 2) [insertion] node)
       _ <- evaluate (forceElement (Node node))
-      assert "wide exact source" (renderNode node == Text.concat texts)
+      assert "wide exact source" (Green.renderNode node == Text.concat texts)
       assert "builder tokens" (buildTokens texts == node)
       assert "builder reuse" (buildReuse node == node)
       assert "monadic builder" (buildMonadic texts == node)
-      assert "checkpoint source" (renderNode (buildWrapped node) == Text.concat texts)
-      assert "wide UTF-8 cache" (nodeTextLength node == sum
+      assert "checkpoint source" (Green.renderNode (buildWrapped node) == Text.concat texts)
+      assert "wide UTF-8 cache" (Green.nodeLength node == sum
         [4 + fromIntegral (length (show index)) | index <- [1 .. count]])
-      assert "last offset" (cursorEnd (checked (cursorChildAt (count - 1) root)) == nodeTextLength node)
-      assert "sibling observation" (siblingSum root == sum (map cursorEnd (cursorChildren root)))
-      assert "typed last token" (cursorEnd (tokenSyntax (selected (astToken root :: Maybe Numbered))) == nodeTextLength node)
-      assert "splice exact source" (renderNode inserted == Text.concat
+      assert "last offset" (cursorEnd (checked (Cursor.childAt (count - 1) root)) == Green.nodeLength node)
+      assert "sibling observation" (siblingSum root == sum (map cursorEnd (Cursor.children root)))
+      assert "typed last token" (cursorEnd (tokenSyntax (selected (Ast.token root :: Maybe Numbered))) == Green.nodeLength node)
+      assert "splice exact source" (Green.renderNode inserted == Text.concat
         [Text.concat (take (count `div` 2) texts), "NEW", Text.concat (drop (count `div` 2) texts)])
     checkChain count = do
       let node = chainTree count
-          root = rootCursor (Node node)
+          root = Cursor.fromGreen (Node node)
       _ <- evaluate (forceElement (Node node))
-      assert "chain source" (renderNode node == chainSource count)
-      assert "chain tokens" (length (cursorTokens root) == 2 * count + 1)
-      assert "chain first offset" (fmap cursorEnd (singleToken (tokenAtOffset 0 root)) == Just 1)
+      assert "chain source" (Green.renderNode node == chainSource count)
+      assert "chain tokens" (length (Cursor.tokens root) == 2 * count + 1)
+      assert "chain first offset" (fmap cursorEnd (singleToken (Cursor.tokenAt 0 root)) == Just 1)
     singleToken (SingleToken cursor) = Just cursor
     singleToken _ = Nothing
     checkDeep depth = do
       let node = deepTree depth
-          root = rootCursor (Node node)
+          root = Cursor.fromGreen (Node node)
           path = replicate (depth + 1) 0
-          leaf = checked (cursorAt path root)
+          leaf = checked (Cursor.at path root)
       _ <- evaluate (forceElement (Node node))
-      assert "deep source" (renderNode node == "001")
-      assert "deep path" (cursorPath leaf == path)
+      assert "deep source" (Green.renderNode node == "001")
+      assert "deep path" (Cursor.path leaf == path)
       assert "deep cached range" (cursorEnd leaf == 3)
-      assert "deep edit" (renderElement (editMany 2 path (Node node)) == "2")
+      assert "deep edit" (Green.render (editMany 2 path (Node node)) == "2")

@@ -7,9 +7,9 @@ module TestModel
 import Data.Bits (finiteBitSize)
 import Data.Char (chr, ord)
 import qualified Data.Text as Text
-import Graft.Cursor
-import Graft.Edit
-import Graft.Green
+import Graft
+import qualified Graft.Cursor as Cursor
+import qualified Graft.Green as Green
 import Test.QuickCheck
 
 data Kind = Root | Group | Name | Space | Comment
@@ -53,8 +53,8 @@ genModel size
       ]
 
 compile :: Model -> GreenElement Kind
-compile (Leaf kind text) = Token (greenToken kind (Text.pack text))
-compile (Branch kind children) = Node (greenNode kind (map compile children))
+compile (Leaf kind text) = Token (Green.token kind (Text.pack text))
+compile (Branch kind children) = Node (Green.node kind (map compile children))
 
 source :: Model -> String
 source (Leaf _ text) = text
@@ -76,10 +76,10 @@ hugeDepth :: Int
 hugeDepth = finiteBitSize (0 :: Int) - 24
 
 validCaches :: GreenElement Kind -> Bool
-validCaches tree = elementTextLength tree == byteLength (Text.unpack (renderElement tree))
+validCaches tree = Green.length tree == byteLength (Text.unpack (Green.render tree))
   && case tree of
     Token _ -> True
-    Node node -> all validCaches (nodeChildren node)
+    Node node -> all validCaches (Green.children node)
 
 -- Each occurrence supplies its path and surrounding source. Contexts come
 -- from the model's leaf text, not from the editing implementation.
@@ -100,11 +100,11 @@ contexts model = ([], "", model, "") : case model of
 -- Edits by path, written with cursors as applications write them. The
 -- properties state their expectations in terms of paths.
 elementAt :: Path -> GreenElement k -> Either PathError (GreenElement k)
-elementAt path root = cursorGreen <$> cursorAt path (rootCursor root)
+elementAt path root = Cursor.green <$> Cursor.at path (Cursor.fromGreen root)
 
 replaceAt :: Path -> GreenElement k -> GreenElement k -> Either PathError (GreenElement k)
 replaceAt path replacement root =
-  cursorTree . replaceFocus replacement <$> cursorAt path (rootCursor root)
+  Cursor.tree . Cursor.replace replacement <$> Cursor.at path (Cursor.fromGreen root)
 
 data PathEditError = ChildEditPathError PathError | EditError ChildEditError
   deriving (Eq, Show)
@@ -112,16 +112,16 @@ data PathEditError = ChildEditPathError PathError | EditError ChildEditError
 editAt
   :: (Cursor k -> Either ChildEditError (Cursor k))
   -> Path -> GreenElement k -> Either PathEditError (GreenElement k)
-editAt edit path root = case cursorAt path (rootCursor root) of
+editAt edit path root = case Cursor.at path (Cursor.fromGreen root) of
   Left err -> Left (ChildEditPathError err)
-  Right focus -> either (Left . EditError) (Right . cursorTree) (edit focus)
+  Right focus -> either (Left . EditError) (Right . Cursor.tree) (edit focus)
 
 spliceChildrenAt
   :: Path -> Int -> Int -> [GreenElement k] -> GreenElement k -> Either PathEditError (GreenElement k)
-spliceChildrenAt path start end replacements = editAt (spliceChildrenFocus start end replacements) path
+spliceChildrenAt path start end replacements = editAt (Cursor.spliceChildren start end replacements) path
 
 insertChildAt :: Path -> Int -> GreenElement k -> GreenElement k -> Either PathEditError (GreenElement k)
-insertChildAt path index element = editAt (insertChildFocus index element) path
+insertChildAt path index element = editAt (Cursor.insertChild index element) path
 
 removeChildAt :: Path -> Int -> GreenElement k -> Either PathEditError (GreenElement k)
-removeChildAt path index = editAt (removeChildFocus index) path
+removeChildAt path index = editAt (Cursor.removeChild index) path

@@ -3,10 +3,12 @@ module Residency (runResidency) where
 import Control.Exception (evaluate)
 import Control.Monad (unless)
 import Data.IORef (newIORef, readIORef)
-import Fixtures
-import Graft
 import qualified Data.List as List
+import Fixtures
 import GHC.Stats
+import Graft
+import qualified Graft.Cursor as Cursor
+import qualified Graft.Green as Green
 import System.Mem (performMajorGC)
 
 data Retained = Roots [GreenElement Kind] | Focus (Cursor Kind)
@@ -14,7 +16,7 @@ data Retained = Roots [GreenElement Kind] | Focus (Cursor Kind)
 -- Force all snapshot roots, but avoid revisiting unchanged descendants for
 -- every edit. Smart constructors already force their immediate cache sums.
 observe :: Retained -> TextLength
-observe (Roots roots) = List.foldl' (\total root -> total + elementTextLength root) 0 roots
+observe (Roots roots) = List.foldl' (\total root -> total + Green.length root) 0 roots
 observe (Focus cursor) = cursorEnd cursor
 
 -- Keep fixture creation out of the caller: only this result survives its GC.
@@ -25,10 +27,10 @@ prepare scenario size edits = do
       path = [size `div` 2, 2]
   case scenario of
     "shared" -> do
-      let line = case nodeChildren (documentTree 1) of
+      let line = case Green.children (documentTree 1) of
             first : _ -> first
             [] -> error "shared fixture has no line"
-          shared = Node (greenNode Root (replicate size line))
+          shared = Node (Green.node Root (replicate size line))
       _ <- evaluate (forceElement shared)
       pure (Roots [shared])
     _ -> do
@@ -37,8 +39,8 @@ prepare scenario size edits = do
         "tree" -> pure (Roots [root])
         "latest" -> evaluated (Roots [editMany edits path root])
         "history" -> evaluated (Roots (snapshots edits path root))
-        "cursor" -> pure (Focus (checked (cursorAt path (rootCursor root))))
-        "detached-token" -> pure (Roots [cursorGreen (checked (cursorAt path (rootCursor root)))])
+        "cursor" -> pure (Focus (checked (Cursor.at path (Cursor.fromGreen root))))
+        "detached-token" -> pure (Roots [Cursor.green (checked (Cursor.at path (Cursor.fromGreen root)))])
         _ -> error "scenario must be tree, shared, latest, history, cursor or detached-token"
   where
     evaluated retained = evaluate (observe retained) >> pure retained

@@ -9,8 +9,10 @@ Initial release.
 * Cursors (zippers) with parent, child, sibling and token navigation, absolute
   byte ranges, offset and range lookup, and edits that return a cursor on the
   edited tree.
-* Persistent replacement, splicing, insertion and removal by path or through a
-  cursor, with structured errors.
+* Persistent replacement, splicing, insertion and removal of a node's
+  children, or anywhere in a tree through a cursor, with structured errors.
+* Short function names meant for qualified import (`Cursor.parent`,
+  `Green.node`); the `Graft` module exports the types and classes.
 * Builders for parsers, with checkpoints for wrapping already-emitted elements,
   as a pure value or in the `Build` monad.
 * Typed AST views over cursors.

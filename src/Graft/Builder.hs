@@ -1,63 +1,48 @@
 {-# LANGUAGE BangPatterns #-}
 
--- | Rowan-style construction and retroactive wrapping. Lexing and parsing
--- remain the caller's responsibility. Trivia is supplied as ordinary token
--- text; construction performs no grammar validation.
+-- | Building green trees from a parser's events, as a pure value. Lexing and
+-- parsing are up to you; trivia is emitted as ordinary tokens, and nothing is
+-- checked against a grammar.
 --
--- A parser usually runs in the 'Build' monad, where 'buildNode' brackets a
--- node so that it cannot be left open:
+-- A parser usually builds in the 'Graft.Build.Build' monad from
+-- "Graft.Build", which threads the builder and its errors and cannot leave a
+-- node open. Use 'Builder' directly when you want to keep builder states
+-- around, for example to branch.
 --
--- @
--- expression :: Build Kind ()
--- expression = do
---   start <- buildCheckpoint
---   buildToken Number "1"
---   buildNodeAt start Binary $ do
---     buildToken Whitespace " "
---     buildToken Plus "+"
---     buildToken Whitespace " "
---     buildToken Number "2"
+-- This module is meant to be imported qualified; its types are also
+-- exported by "Graft":
 --
--- tree :: Either BuilderError (GreenNode Kind)
--- tree = execBuild (buildNode Root expression)
--- @
+-- > import Graft
+-- > import qualified Graft.Builder as Builder
 --
--- 'Build' is a thin layer over the pure 'Builder' value, which remains
--- available for code that wants to keep or branch builder states.
+-- >>> :set -XOverloadedStrings
+-- >>> import qualified Graft.Builder as Builder
+-- >>> import qualified Graft.Green as Green
+-- >>> let operand = Builder.token 'n' "1" (Builder.startNode 'r' Builder.empty)
+-- >>> let Right wrapped = Builder.startNodeAt (Builder.checkpoint (Builder.startNode 'r' Builder.empty)) 'e' operand
+-- >>> let Right closed = Builder.finishNode (Builder.token 'n' "2" (Builder.token 'o' "+" wrapped)) >>= Builder.finishNode
+-- >>> Green.renderNode <$> Builder.finish closed
+-- Right "1+2"
 module Graft.Builder
-  ( -- * Building in a monad
-    Build
-  , runBuild
-  , execBuild
-  , buildNode
-  , buildNodeAt
-  , buildToken
-  , buildElement
-  , buildCheckpoint
-  , buildStartNode
-  , buildStartNodeAt
-  , buildFinishNode
-  , saveBuilder
-  , restoreBuilder
-    -- * Pure builder values
-  , Builder
+  ( Builder
   , Checkpoint
   , BuilderError (..)
-  , emptyBuilder
+  , empty
   , startNode
-  , emitToken
-  , emitElement
-  , finishNode
-  , checkpoint
   , startNodeAt
-  , runBuilder
+  , finishNode
+  , token
+  , element
+  , checkpoint
+  , finish
   ) where
 
 import Control.DeepSeq (NFData (..))
 import Control.Exception (Exception)
 import Data.Text (Text)
-import Graft.Green
-import Graft.Green.Internal (greenNodeReversed)
+import Graft.Green.Internal (GreenElement (..), GreenNode)
+import qualified Graft.Green as Green
+import qualified Graft.Green.Internal as Internal
 
 -- | A tree under construction: the elements emitted so far and the nodes
 -- still open. A builder is an ordinary immutable value, so keeping an old one
@@ -67,22 +52,22 @@ import Graft.Green.Internal (greenNodeReversed)
 data Builder kind = Builder !Int [GreenElement kind] [(kind, Int)]
   deriving (Eq)
 
--- | Shows a sequence of 'startNode' and 'emitElement' calls that rebuilds an
+-- | Shows a sequence of 'startNode' and 'element' calls that rebuilds an
 -- equal builder.
 instance Show kind => Show (Builder kind) where
   showsPrec precedence (Builder count pending parents) = go precedence (reverse steps)
     where
       elements = reverse pending
-      opened position = [kind | (kind, start) <- reverse parents, start == position]
+      opened position = [nodeKind | (nodeKind, from) <- reverse parents, from == position]
       steps = concat
-        [ map Left (opened position) ++ [Right element | element <- take 1 rest]
+        [ map Left (opened position) ++ [Right emitted | emitted <- take 1 rest]
         | (position, rest) <- zip [0 .. count] (iterate (drop 1) elements)
         ]
-      go _ [] = showString "emptyBuilder"
-      go outer (Left kind : earlier) = showParen (outer > 10) $
-        showString "startNode " . showsPrec 11 kind . showChar ' ' . go 11 earlier
-      go outer (Right element : earlier) = showParen (outer > 10) $
-        showString "emitElement " . showsPrec 11 element . showChar ' ' . go 11 earlier
+      go _ [] = showString "Builder.empty"
+      go outer (Left nodeKind : earlier) = showParen (outer > 10) $
+        showString "Builder.startNode " . showsPrec 11 nodeKind . showChar ' ' . go 11 earlier
+      go outer (Right emitted : earlier) = showParen (outer > 10) $
+        showString "Builder.element " . showsPrec 11 emitted . showChar ' ' . go 11 earlier
 
 instance NFData kind => NFData (Builder kind) where
   rnf (Builder _ pending parents) = rnf pending `seq` rnf parents
@@ -118,30 +103,30 @@ instance NFData BuilderError where
   rnf err = err `seq` ()
 
 -- | A builder with nothing emitted and no open nodes.
-emptyBuilder :: Builder kind
-emptyBuilder = Builder 0 [] []
+empty :: Builder kind
+empty = Builder 0 [] []
 
 -- | Open a node, which 'finishNode' closes.
 startNode :: kind -> Builder kind -> Builder kind
-startNode kind (Builder count pending parents) =
-  Builder count pending ((kind, count) : parents)
+startNode nodeKind (Builder count pending parents) =
+  Builder count pending ((nodeKind, count) : parents)
 
 -- | Emit a token. Constant time.
-emitToken :: kind -> Text -> Builder kind -> Builder kind
-emitToken kind text = emitElement (Token (greenToken kind text))
+token :: kind -> Text -> Builder kind -> Builder kind
+token tokenKind contents = element (Token (Green.token tokenKind contents))
 
 -- | Emit an existing node or token, such as an unchanged subtree from an
 -- earlier tree. Constant time; the element is shared, not copied.
-emitElement :: GreenElement kind -> Builder kind -> Builder kind
-emitElement !element (Builder count pending parents) =
-  Builder (count + 1) (element : pending) parents
+element :: GreenElement kind -> Builder kind -> Builder kind
+element !emitted (Builder count pending parents) =
+  Builder (count + 1) (emitted : pending) parents
 
 -- | Close the innermost open node, making everything emitted since it opened
 -- into its children. Takes time proportional to the number of children.
 finishNode :: Builder kind -> Either BuilderError (Builder kind)
 finishNode (Builder _ _ []) = Left NoOpenNode
-finishNode (Builder count pending ((kind, start) : parents)) =
-  case greenNodeReversed kind (count - start) pending of
+finishNode (Builder count pending ((nodeKind, start) : parents)) =
+  case Internal.greenNodeReversed nodeKind (count - start) pending of
     (!node, before) -> Right (Builder (start + 1) (Node node : before) parents)
 
 -- | The current position, for a later 'startNodeAt'.
@@ -153,100 +138,19 @@ checkpoint (Builder count _ _) = Checkpoint count
 -- This is how a parser wraps an operand it has already emitted once it sees
 -- the operator. The checkpoint must lie within the current open node.
 startNodeAt :: Checkpoint -> kind -> Builder kind -> Either BuilderError (Builder kind)
-startNodeAt (Checkpoint position) kind (Builder count pending parents)
+startNodeAt (Checkpoint position) nodeKind (Builder count pending parents)
   | position > count = Left (CheckpointOutOfBounds position count)
   | (_, start) : _ <- parents, position < start =
       Left (CheckpointBeforeCurrentNode position start)
-  | otherwise = Right (Builder count pending ((kind, position) : parents))
+  | otherwise = Right (Builder count pending ((nodeKind, position) : parents))
 
 -- | The finished tree. Fails if a node is still open (checked first), or
 -- unless exactly one node was emitted at the top level.
-runBuilder :: Builder kind -> Either BuilderError (GreenNode kind)
-runBuilder (Builder count pending parents) = case parents of
+finish :: Builder kind -> Either BuilderError (GreenNode kind)
+finish (Builder count pending parents) = case parents of
   _ : _ -> Left (UnclosedNodes (length parents))
   [] -> case pending of
     [] -> Left EmptyBuilder
     [Node node] -> Right node
     [Token _] -> Left TokenRoot
     _ -> Left (MultipleRoots count)
-
--- | A construction in progress: a state monad over 'Builder' that stops at
--- the first 'BuilderError'.
-newtype Build kind a = Build (Builder kind -> Either BuilderError (a, Builder kind))
-
-instance Functor (Build kind) where
-  fmap f (Build run) = Build $ \builder -> do
-    (value, next) <- run builder
-    pure (f value, next)
-
-instance Applicative (Build kind) where
-  pure value = Build $ \builder -> Right (value, builder)
-  Build runFunction <*> Build runValue = Build $ \builder -> do
-    (f, next) <- runFunction builder
-    (value, final) <- runValue next
-    pure (f value, final)
-
-instance Monad (Build kind) where
-  Build run >>= continue = Build $ \builder -> do
-    (value, next) <- run builder
-    let Build runNext = continue value
-    runNext next
-
--- | Run a construction from 'emptyBuilder' and validate it with 'runBuilder'.
-runBuild :: Build kind a -> Either BuilderError (a, GreenNode kind)
-runBuild (Build run) = do
-  (value, builder) <- run emptyBuilder
-  root <- runBuilder builder
-  pure (value, root)
-
--- | Run a construction and return only its root node.
-execBuild :: Build kind a -> Either BuilderError (GreenNode kind)
-execBuild = fmap snd . runBuild
-
--- | Build a node around the elements that the body emits. The node is closed
--- when the body returns, so it cannot be left open or closed twice.
-buildNode :: kind -> Build kind a -> Build kind a
-buildNode kind body = buildStartNode kind *> body <* buildFinishNode
-
--- | Build a node that starts at an earlier checkpoint, wrapping the elements
--- emitted since then together with those the body emits. Fails as
--- 'startNodeAt' does.
-buildNodeAt :: Checkpoint -> kind -> Build kind a -> Build kind a
-buildNodeAt marker kind body = buildStartNodeAt marker kind *> body <* buildFinishNode
-
--- | Emit a token, as 'emitToken'.
-buildToken :: kind -> Text -> Build kind ()
-buildToken kind text = modifyBuilder (emitToken kind text)
-
--- | Emit an existing green element, as 'emitElement'.
-buildElement :: GreenElement kind -> Build kind ()
-buildElement element = modifyBuilder (emitElement element)
-
--- | Mark the current end of the pending forest, as 'checkpoint'.
-buildCheckpoint :: Build kind Checkpoint
-buildCheckpoint = Build $ \builder -> Right (checkpoint builder, builder)
-
--- | Open a node that a later 'buildFinishNode' closes, for parsers whose
--- start and finish happen in different places. Prefer 'buildNode'.
-buildStartNode :: kind -> Build kind ()
-buildStartNode kind = modifyBuilder (startNode kind)
-
--- | Open a node at an earlier checkpoint, as 'startNodeAt'. Prefer 'buildNodeAt'.
-buildStartNodeAt :: Checkpoint -> kind -> Build kind ()
-buildStartNodeAt marker kind = Build $ \builder -> (,) () <$> startNodeAt marker kind builder
-
--- | Close the innermost open node, as 'finishNode'.
-buildFinishNode :: Build kind ()
-buildFinishNode = Build $ \builder -> (,) () <$> finishNode builder
-
--- | The current builder state. Together with 'restoreBuilder' this lets a
--- backtracking parser return to an earlier state after a failed alternative.
-saveBuilder :: Build kind (Builder kind)
-saveBuilder = Build $ \builder -> Right (builder, builder)
-
--- | Replace the current builder state with a saved one.
-restoreBuilder :: Builder kind -> Build kind ()
-restoreBuilder saved = Build $ \_ -> Right ((), saved)
-
-modifyBuilder :: (Builder kind -> Builder kind) -> Build kind ()
-modifyBuilder step = Build $ \builder -> let !next = step builder in Right ((), next)

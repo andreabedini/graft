@@ -6,6 +6,9 @@ import Data.Bifunctor (bimap)
 import Data.List (isPrefixOf)
 import qualified Data.Text as Text
 import Graft
+import qualified Graft.Cursor as Cursor
+import qualified Graft.Green as Green
+import qualified Graft.Range as Range
 import Test.QuickCheck
 import TestModel
 
@@ -36,14 +39,14 @@ matches expected result = case result of
   Left err -> counterexample (show err) False
   Right edited -> conjoin
     [ edited === compile expected
-    , Text.unpack (renderElement edited) === source expected
+    , Text.unpack (Green.render edited) === source expected
     , counterexample "cache invariant" (validCaches edited)
     , conjoin
-        [ case cursorAt path (rootCursor edited) of
+        [ case Cursor.at path (Cursor.fromGreen edited) of
             Left err -> counterexample (show (path, err)) False
             Right focus -> conjoin
-              [ cursorGreen focus === compile selected
-              , cursorRange focus === rangeFromLength (byteLength prefix) (byteLength (source selected))
+              [ Cursor.green focus === compile selected
+              , Cursor.range focus === Range.fromLength (byteLength prefix) (byteLength (source selected))
               ]
         | (path, prefix, selected, _) <- contexts expected
         ]
@@ -62,7 +65,7 @@ propDirectSplice = forAll genNode $ \model -> case model of
       classify (start == end) "insertion" $
       classify (null replacements && start /= end) "deletion" $
       matches (Branch kind (take start items ++ replacements ++ drop end items))
-        (Node <$> spliceChildren start end (map compile replacements) (asNode model))
+        (Node <$> Green.spliceChildren start end (map compile replacements) (asNode model))
   Leaf _ _ -> error "expected oracle node"
 
 -- Map only untouched occurrences. Ancestors/focus change structurally, and
@@ -86,15 +89,15 @@ propNestedSplice = forAll (genTarget False) $ \(model, path, kind, items) ->
     let root = compile model
         expected = modelReplace path (Branch kind (take start items ++ replacements ++ drop end items)) model
         edited = spliceChildrenAt path start end (map compile replacements) root
-    in classify (not (null path)) "nested node" $ case cursorAt path (rootCursor root) of
+    in classify (not (null path)) "nested node" $ case Cursor.at path (Cursor.fromGreen root) of
       Left err -> counterexample (show err) False
       Right focus -> conjoin
         [ matches expected edited
-        , bimap EditError cursorTree (spliceChildrenFocus start end (map compile replacements) focus) === edited
-        , fmap cursorPath (spliceChildrenFocus start end (map compile replacements) focus) === Right path
-        , cursorGreen (cursorRoot focus) === root
-        , cursorPath focus === path
-        , Text.unpack (renderElement root) === source model
+        , bimap EditError Cursor.tree (Cursor.spliceChildren start end (map compile replacements) focus) === edited
+        , fmap Cursor.path (Cursor.spliceChildren start end (map compile replacements) focus) === Right path
+        , Cursor.green (Cursor.root focus) === root
+        , Cursor.path focus === path
+        , Text.unpack (Green.render root) === source model
         , case edited of
             Left err -> counterexample (show err) False
             Right result -> conjoin
@@ -113,17 +116,17 @@ propInsertion = forAll (genTarget False) $ \(model, path, kind, items) ->
         updated = Branch kind (take index items ++ [replacement] ++ drop index items)
         element = compile replacement
         root = compile model
-        direct = insertChild index element (asNode target)
+        direct = Green.insertChild index element (asNode target)
         edited = insertChildAt path index element root
     in classify (index == length items) "append" $
       conjoin
         [ matches updated (Node <$> direct)
         , matches (modelReplace path updated model) edited
-        , (direct >>= removeChild index) === Right (asNode target)
+        , (direct >>= Green.removeChild index) === Right (asNode target)
         , (edited >>= removeChildAt path index) === Right root
-        , case cursorAt path (rootCursor root) of
+        , case Cursor.at path (Cursor.fromGreen root) of
             Left err -> counterexample (show err) False
-            Right focus -> bimap EditError cursorTree (insertChildFocus index element focus) === edited
+            Right focus -> bimap EditError Cursor.tree (Cursor.insertChild index element focus) === edited
         ]
 
 propRemoval :: Property
@@ -132,15 +135,15 @@ propRemoval = forAll (genTarget True) $ \(model, path, kind, items) ->
     let target = Branch kind items
         updated = Branch kind (take index items ++ drop (index + 1) items)
         root = compile model
-        direct = removeChild index (asNode target)
+        direct = Green.removeChild index (asNode target)
         edited = removeChildAt path index root
     in conjoin
       [ matches updated (Node <$> direct)
       , matches (modelReplace path updated model) edited
-      , (direct >>= insertChild index (compile (items !! index))) === Right (asNode target)
-      , case cursorAt path (rootCursor root) of
+      , (direct >>= Green.insertChild index (compile (items !! index))) === Right (asNode target)
+      , case Cursor.at path (Cursor.fromGreen root) of
           Left err -> counterexample (show err) False
-          Right focus -> bimap EditError cursorTree (removeChildFocus index focus) === edited
+          Right focus -> bimap EditError Cursor.tree (Cursor.removeChild index focus) === edited
       ]
 
 propNoOp :: Property
@@ -166,18 +169,18 @@ propInvalidBounds = forAll (genTarget False) $ \(model, path, kind, items) ->
       root = compile model
   in conjoin $
     [ conjoin
-        [ spliceChildren start end [] node === Left err
+        [ Green.spliceChildren start end [] node === Left err
         , spliceChildrenAt path start end [] root === Left (EditError err)
-        , case cursorAt path (rootCursor root) of
+        , case Cursor.at path (Cursor.fromGreen root) of
             Left pathErr -> counterexample (show pathErr) False
-            Right focus -> fmap cursorTree (spliceChildrenFocus start end [] focus) === Left err
+            Right focus -> fmap Cursor.tree (Cursor.spliceChildren start end [] focus) === Left err
         ]
     | (start, end, err) <- bad
     ] ++
-    [ insertChild (-1) root node === Left (NegativeChildBoundary (-1))
-    , removeChild (-1) node === Left (NegativeChildBoundary (-1))
-    , removeChild count node === Left (ChildBoundaryOutOfBounds count)
-    , removeChild maxBound node === Left (ChildBoundaryOutOfBounds maxBound)
+    [ Green.insertChild (-1) root node === Left (NegativeChildBoundary (-1))
+    , Green.removeChild (-1) node === Left (NegativeChildBoundary (-1))
+    , Green.removeChild count node === Left (ChildBoundaryOutOfBounds count)
+    , Green.removeChild maxBound node === Left (ChildBoundaryOutOfBounds maxBound)
     ]
 
 propInvalidTargets :: Model -> Property
@@ -187,12 +190,12 @@ propInvalidTargets model = conjoin
         [ spliceChildrenAt path (-1) (-2) [] root === Left (EditError CannotEditTokenChildren)
         , insertChildAt path (-1) root root === Left (EditError CannotEditTokenChildren)
         , removeChildAt path (-1) root === Left (EditError CannotEditTokenChildren)
-        , case cursorAt path (rootCursor root) of
+        , case Cursor.at path (Cursor.fromGreen root) of
             Left err -> counterexample (show err) False
             Right focus -> conjoin
-              [ fmap cursorTree (spliceChildrenFocus (-1) (-2) [] focus) === Left CannotEditTokenChildren
-              , fmap cursorTree (insertChildFocus (-1) root focus) === Left CannotEditTokenChildren
-              , fmap cursorTree (removeChildFocus (-1) focus) === Left CannotEditTokenChildren
+              [ fmap Cursor.tree (Cursor.spliceChildren (-1) (-2) [] focus) === Left CannotEditTokenChildren
+              , fmap Cursor.tree (Cursor.insertChild (-1) root focus) === Left CannotEditTokenChildren
+              , fmap Cursor.tree (Cursor.removeChild (-1) focus) === Left CannotEditTokenChildren
               ]
         , badPath (path ++ [0]) CannotDescendIntoToken
         , badPath (path ++ [-1]) (NegativeChildIndex (-1))
@@ -213,35 +216,35 @@ propInvalidTargets model = conjoin
 
 regressions :: Property
 regressions = once $ conjoin
-  [ insertChild 0 (tok "") empty === Right (greenNode Group [tok ""])
-  , removeChild 0 (greenNode Group [tok "x"]) === Right empty
-  , removeChild 0 empty === Left (ChildBoundaryOutOfBounds 0)
-  , fmap renderNode (spliceChildren 1 2 [tok " + ", tok "中"] original)
+  [ Green.insertChild 0 (tok "") empty === Right (Green.node Group [tok ""])
+  , Green.removeChild 0 (Green.node Group [tok "x"]) === Right empty
+  , Green.removeChild 0 empty === Left (ChildBoundaryOutOfBounds 0)
+  , fmap Green.renderNode (Green.spliceChildren 1 2 [tok " + ", tok "中"] original)
       === Right "λ + 中\r\n-- keep\0"
-  , fmap renderNode (spliceChildren 0 3 [] original) === Right ""
-  , fmap nodeKind (spliceChildren 0 3 [] original) === Right Group
-  , spliceChildren 0 maxBound (error "invalid edit must not inspect replacements") empty
+  , fmap Green.renderNode (Green.spliceChildren 0 3 [] original) === Right ""
+  , fmap Green.nodeKind (Green.spliceChildren 0 3 [] original) === Right Group
+  , Green.spliceChildren 0 maxBound (error "invalid edit must not inspect replacements") empty
       === Left (ChildBoundaryOutOfBounds maxBound)
-  , spliceChildren maxBound maxBound [] empty === Left (ChildBoundaryOutOfBounds maxBound)
-  , spliceChildren minBound maxBound [] empty === Left (NegativeChildBoundary minBound)
+  , Green.spliceChildren maxBound maxBound [] empty === Left (ChildBoundaryOutOfBounds maxBound)
+  , Green.spliceChildren minBound maxBound [] empty === Left (NegativeChildBoundary minBound)
   , conjoin
-      [ elementTextLength hugeEdited === 2 ^ hugeDepth + 1
-      , case cursorAt [1] (rootCursor hugeEdited) of
+      [ Green.length hugeEdited === 2 ^ hugeDepth + 1
+      , case Cursor.at [1] (Cursor.fromGreen hugeEdited) of
           Left err -> counterexample (show err) False
-          Right focus -> cursorRange focus === rangeFromLength (2 ^ hugeDepth) 1
+          Right focus -> Cursor.range focus === Range.fromLength (2 ^ hugeDepth) 1
       ]
-  , case insertChild 0 (Node empty) (greenNode Root [tok "x"]) of
+  , case Green.insertChild 0 (Node empty) (Green.node Root [tok "x"]) of
       Left err -> counterexample (show err) False
-      Right node -> case cursorAt [1] (rootCursor (Node node)) of
+      Right node -> case Cursor.at [1] (Cursor.fromGreen (Node node)) of
         Left err -> counterexample (show err) False
-        Right focus -> conjoin [cursorPath focus === [1], cursorRange focus === rangeFromLength 0 1]
+        Right focus -> conjoin [Cursor.path focus === [1], Cursor.range focus === Range.fromLength 0 1]
   ]
   where
-    empty = greenNode Group []
-    tok = Token . greenToken Name
-    original = greenNode Group [tok "λ", tok "\t", tok "\r\n-- keep\0"]
-    huge = iterate (\element -> Node (greenNode Group [element, element])) (tok "x") !! hugeDepth
-    hugeEdited = case insertChild 1 (tok "z") (greenNode Root [huge]) of
+    empty = Green.node Group []
+    tok = Token . Green.token Name
+    original = Green.node Group [tok "λ", tok "\t", tok "\r\n-- keep\0"]
+    huge = iterate (\element -> Node (Green.node Group [element, element])) (tok "x") !! hugeDepth
+    hugeEdited = case Green.insertChild 1 (tok "z") (Green.node Root [huge]) of
       Right node -> Node node
       Left err -> error (show err)
 

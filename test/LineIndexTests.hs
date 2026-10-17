@@ -2,8 +2,8 @@ module LineIndexTests (lineIndexProperties) where
 
 import Data.Char (ord)
 import qualified Data.Text as Text
-import Graft.Green (TextLength (..))
-import Graft.LineIndex
+import Graft
+import qualified Graft.LineIndex as LineIndex
 import Test.QuickCheck
 import TestModel (byteLength, genText)
 
@@ -38,16 +38,16 @@ terminators [] = 0
 
 propPositions :: Property
 propPositions = forAll genText $ \text ->
-  let index = lineIndex (Text.pack text)
+  let index = LineIndex.fromText (Text.pack text)
   in conjoin
-      [ lineCount index === terminators text + 1
+      [ LineIndex.lineCount index === terminators text + 1
       , conjoin
           [ counterexample (show place) $ conjoin
-              [ utf8Position (placeOffset place) index === Just (Position (placeLine place) (placeUtf8 place))
-              , utf16Position (placeOffset place) index === Just (Position (placeLine place) (placeUtf16 place))
+              [ LineIndex.utf8Position (placeOffset place) index === Just (Position (placeLine place) (placeUtf8 place))
+              , LineIndex.utf16Position (placeOffset place) index === Just (Position (placeLine place) (placeUtf16 place))
               , placeAfterCarriage place .||. conjoin
-                  [ fromUtf8Position (Position (placeLine place) (placeUtf8 place)) index === Just (placeOffset place)
-                  , fromUtf16Position (Position (placeLine place) (placeUtf16 place)) index === Just (placeOffset place)
+                  [ LineIndex.fromUtf8Position (Position (placeLine place) (placeUtf8 place)) index === Just (placeOffset place)
+                  , LineIndex.fromUtf16Position (Position (placeLine place) (placeUtf16 place)) index === Just (placeOffset place)
                   ]
               ]
           | place <- places text
@@ -56,32 +56,32 @@ propPositions = forAll genText $ \text ->
 
 propInvalid :: Property
 propInvalid = forAll genText $ \text ->
-  let index = lineIndex (Text.pack text)
+  let index = LineIndex.fromText (Text.pack text)
       size = byteLength text
       starts = map placeOffset (places text)
       inside = [offset | offset <- [0 .. size], offset `notElem` starts]
   in conjoin
-      [ utf8Position (-1) index === Nothing
-      , utf8Position (size + 1) index === Nothing
-      , utf16Position (size + 1) index === Nothing
-      , conjoin [utf16Position offset index === Nothing | offset <- inside]
-      , conjoin [fmap positionLine (utf8Position offset index) =/= Nothing | offset <- inside]
-      , fromUtf16Position (Position (lineCount index) 0) index === Nothing
-      , fromUtf16Position (Position 0 (-1)) index === Nothing
+      [ LineIndex.utf8Position (-1) index === Nothing
+      , LineIndex.utf8Position (size + 1) index === Nothing
+      , LineIndex.utf16Position (size + 1) index === Nothing
+      , conjoin [LineIndex.utf16Position offset index === Nothing | offset <- inside]
+      , conjoin [fmap positionLine (LineIndex.utf8Position offset index) =/= Nothing | offset <- inside]
+      , LineIndex.fromUtf16Position (Position (LineIndex.lineCount index) 0) index === Nothing
+      , LineIndex.fromUtf16Position (Position 0 (-1)) index === Nothing
       ]
 
 regressions :: Property
 regressions = once $ conjoin
-  [ lineCount (lineIndex (Text.pack "")) === 1
-  , lineCount (lineIndex (Text.pack "a\r\nb\rc\n")) === 4
-  , map (`lineStart` lineIndex (Text.pack "a\r\nb\rc\n")) [0 .. 4] === map (fmap TextLength) [Just 0, Just 3, Just 5, Just 7, Nothing]
+  [ LineIndex.lineCount (LineIndex.fromText (Text.pack "")) === 1
+  , LineIndex.lineCount (LineIndex.fromText (Text.pack "a\r\nb\rc\n")) === 4
+  , map (`LineIndex.lineStart` LineIndex.fromText (Text.pack "a\r\nb\rc\n")) [0 .. 4] === map (fmap TextLength) [Just 0, Just 3, Just 5, Just 7, Nothing]
   -- Columns past the end of a line clamp to its content, before "\r\n".
-  , fromUtf16Position (Position 0 99) (lineIndex (Text.pack "ab\r\ncd")) === Just 2
-  , fromUtf8Position (Position 1 99) (lineIndex (Text.pack "ab\r\ncd")) === Just 6
+  , LineIndex.fromUtf16Position (Position 0 99) (LineIndex.fromText (Text.pack "ab\r\ncd")) === Just 2
+  , LineIndex.fromUtf8Position (Position 1 99) (LineIndex.fromText (Text.pack "ab\r\ncd")) === Just 6
   -- U+1F600 takes four bytes and two UTF-16 code units.
-  , utf16Position 5 (lineIndex (Text.pack "x\x1F600y")) === Just (Position 0 3)
-  , fromUtf16Position (Position 0 2) (lineIndex (Text.pack "x\x1F600y")) === Nothing
-  , fromUtf16Position (Position 0 3) (lineIndex (Text.pack "x\x1F600y")) === Just 5
+  , LineIndex.utf16Position 5 (LineIndex.fromText (Text.pack "x\x1F600y")) === Just (Position 0 3)
+  , LineIndex.fromUtf16Position (Position 0 2) (LineIndex.fromText (Text.pack "x\x1F600y")) === Nothing
+  , LineIndex.fromUtf16Position (Position 0 3) (LineIndex.fromText (Text.pack "x\x1F600y")) === Just 5
   ]
 
 lineIndexProperties :: [(String, Property)]

@@ -1,78 +1,85 @@
 -- | Half-open ranges of UTF-8 byte offsets: a range includes its start and
 -- excludes its end.
 --
--- >>> let range = rangeFromLength 4 3
--- >>> (rangeStart range, rangeEnd range)
+-- This module is meant to be imported qualified; 'TextRange' is also
+-- exported by "Graft":
+--
+-- > import Graft
+-- > import qualified Graft.Range as Range
+--
+-- >>> import qualified Graft.Range as Range
+-- >>> let range = Range.fromLength 4 3
+-- >>> (Range.start range, Range.end range)
 -- (4,7)
--- >>> map (`rangeContains` range) [3, 4, 6, 7]
+-- >>> map (`Range.contains` range) [3, 4, 6, 7]
 -- [False,True,True,False]
--- >>> textRange 7 4
+-- >>> Range.fromEnds 7 4
 -- Nothing
 module Graft.Range
   ( TextRange
-  , textRange
-  , rangeFromLength
-  , rangeStart
-  , rangeEnd
-  , rangeLength
-  , rangeIsEmpty
-  , rangeContains
-  , rangeContainsRange
+  , fromEnds
+  , fromLength
+  , start
+  , end
+  , length
+  , isEmpty
+  , contains
+  , containsRange
   ) where
 
 import Control.DeepSeq (NFData (..))
 import Data.Hashable (Hashable (..))
-import Graft.Green (TextLength)
+import Graft.Green.Internal (TextLength)
+import Prelude hiding (length)
 
 -- | A range of byte offsets whose start is no greater than its end. The
 -- endpoints need not fall on character boundaries.
 data TextRange = TextRange !TextLength !TextLength
   deriving (Eq, Ord)
 
--- | Shows the 'rangeFromLength' call that rebuilds the range.
+-- | Shows the 'fromLength' call that rebuilds the range.
 instance Show TextRange where
-  showsPrec precedence (TextRange start end) = showParen (precedence > 10) $
-    showString "rangeFromLength " . showsPrec 11 start . showChar ' ' . showsPrec 11 (end - start)
+  showsPrec precedence (TextRange from to) = showParen (precedence > 10) $
+    showString "Range.fromLength " . showsPrec 11 from . showChar ' ' . showsPrec 11 (to - from)
 
 instance NFData TextRange where
   rnf (TextRange _ _) = ()
 
 instance Hashable TextRange where
-  hashWithSalt salt (TextRange start end) = salt `hashWithSalt` start `hashWithSalt` end
+  hashWithSalt salt (TextRange from to) = salt `hashWithSalt` from `hashWithSalt` to
 
 -- | The range from a start to an end, or 'Nothing' if the end comes first.
-textRange :: TextLength -> TextLength -> Maybe TextRange
-textRange start end
-  | start <= end = Just (TextRange start end)
+fromEnds :: TextLength -> TextLength -> Maybe TextRange
+fromEnds from to
+  | from <= to = Just (TextRange from to)
   | otherwise = Nothing
 
 -- | The range with a start and a length, which must not be negative.
-rangeFromLength :: TextLength -> TextLength -> TextRange
-rangeFromLength start len = TextRange start (start + len)
+fromLength :: TextLength -> TextLength -> TextRange
+fromLength from len = TextRange from (from + len)
 
--- | Inclusive start offset.
-rangeStart :: TextRange -> TextLength
-rangeStart (TextRange start _) = start
+-- | The first offset in the range.
+start :: TextRange -> TextLength
+start (TextRange from _) = from
 
--- | Exclusive end offset.
-rangeEnd :: TextRange -> TextLength
-rangeEnd (TextRange _ end) = end
+-- | The offset just past the end of the range.
+end :: TextRange -> TextLength
+end (TextRange _ to) = to
 
--- | Number of bytes in the range.
-rangeLength :: TextRange -> TextLength
-rangeLength (TextRange start end) = end - start
+-- | The number of bytes in the range.
+length :: TextRange -> TextLength
+length (TextRange from to) = to - from
 
 -- | Whether the range has length zero.
-rangeIsEmpty :: TextRange -> Bool
-rangeIsEmpty range = rangeStart range == rangeEnd range
+isEmpty :: TextRange -> Bool
+isEmpty range = start range == end range
 
 -- | Whether an offset lies in the range. The end is excluded, so an empty
 -- range contains no offsets.
-rangeContains :: TextLength -> TextRange -> Bool
-rangeContains offset range = rangeStart range <= offset && offset < rangeEnd range
+contains :: TextLength -> TextRange -> Bool
+contains offset range = start range <= offset && offset < end range
 
--- | @rangeContainsRange outer inner@ is whether @inner@ lies within @outer@,
+-- | @containsRange outer inner@ is whether @inner@ lies within @outer@,
 -- including an empty @inner@ at either end of @outer@.
-rangeContainsRange :: TextRange -> TextRange -> Bool
-rangeContainsRange outer inner =
-  rangeStart outer <= rangeStart inner && rangeEnd inner <= rangeEnd outer
+containsRange :: TextRange -> TextRange -> Bool
+containsRange outer inner = start outer <= start inner && end inner <= end outer

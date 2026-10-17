@@ -12,17 +12,24 @@
 -- that line, so an offset just after a @\\r@ that precedes @\\n@ still lies
 -- on the @\\r@'s line.
 --
+-- This module is meant to be imported qualified; its types are also
+-- exported by "Graft":
+--
+-- > import Graft
+-- > import qualified Graft.LineIndex as LineIndex
+--
 -- >>> :set -XOverloadedStrings
--- >>> let index = lineIndex "let x =\r\n  \"\x1F600\" in x\n"
--- >>> utf8Position 16 index
+-- >>> import qualified Graft.LineIndex as LineIndex
+-- >>> let index = LineIndex.fromText "let x =\r\n  \"\x1F600\" in x\n"
+-- >>> LineIndex.utf8Position 16 index
 -- Just (Position {positionLine = 1, positionColumn = 7})
--- >>> utf16Position 16 index
+-- >>> LineIndex.utf16Position 16 index
 -- Just (Position {positionLine = 1, positionColumn = 5})
--- >>> fromUtf16Position (Position 1 5) index
+-- >>> LineIndex.fromUtf16Position (Position 1 5) index
 -- Just 16
 module Graft.LineIndex
   ( LineIndex
-  , lineIndex
+  , fromText
   , lineCount
   , lineStart
   , Position (..)
@@ -40,7 +47,7 @@ import Data.Text (Text)
 import qualified Data.Text.Array as Array
 import Data.Text.Internal (Text (..))
 import Data.Word (Word8)
-import Graft.Green (TextLength (..))
+import Graft.Green.Internal (TextLength (..))
 
 -- | A text together with the byte offset at which each of its lines starts.
 data LineIndex = LineIndex !Text !(PrimArray Int)
@@ -50,7 +57,7 @@ instance NFData LineIndex where
 
 instance Show LineIndex where
   showsPrec precedence (LineIndex text _) = showParen (precedence > 10) $
-    showString "lineIndex " . showsPrec 11 text
+    showString "LineIndex.fromText " . showsPrec 11 text
 
 -- | A zero-based line and column. The unit of the column depends on the
 -- function that produced or consumes it.
@@ -67,8 +74,8 @@ instance Hashable Position where
   hashWithSalt salt (Position line column) = salt `hashWithSalt` line `hashWithSalt` column
 
 -- | Index the lines of a text, in time proportional to its length.
-lineIndex :: Text -> LineIndex
-lineIndex text@(Text _ _ len) = LineIndex text (primArrayFromList (0 : go 0))
+fromText :: Text -> LineIndex
+fromText text@(Text _ _ len) = LineIndex text (primArrayFromList (0 : go 0))
   where
     go !index
       | index >= len = []

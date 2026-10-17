@@ -5,49 +5,52 @@ module Main (main) where
 import AstTests (astProperties)
 import BuilderTests (builderProperties)
 import ChildEditTests (childEditProperties)
-import LineIndexTests (lineIndexProperties)
 import Control.Monad (unless)
 import Data.Hashable (hash)
 import Data.List (find, isPrefixOf)
 import qualified Data.Text as Text
 import Graft
+import qualified Graft.Cursor as Cursor
+import qualified Graft.Green as Green
+import qualified Graft.Range as Range
+import LineIndexTests (lineIndexProperties)
 import System.Exit (exitFailure)
 import Test.QuickCheck
 import TestModel
 
 propRendering :: Model -> Property
 propRendering model =
-  Text.unpack (renderElement (compile model)) === source model
+  Text.unpack (Green.render (compile model)) === source model
 
 propLengths :: Model -> Property
 propLengths model = conjoin
   [ counterexample (show path) $
       case elementAt path (compile model) of
         Left err -> counterexample (show err) False
-        Right tree -> elementTextLength tree === byteLength (source selected)
+        Right tree -> Green.length tree === byteLength (source selected)
   | (path, _, selected, _) <- contexts model
   ]
 
 propToken :: Property
 propToken = forAll genText $ \text ->
-  let token = greenToken Name (Text.pack text)
+  let token = Green.token Name (Text.pack text)
   in conjoin
-      [ Text.unpack (tokenText token) === text
-      , renderToken token === Text.pack text
-      , tokenTextLength token === byteLength text
-      , tokenKind token === Name
+      [ Text.unpack (Green.text token) === text
+      , Green.text token === Text.pack text
+      , Green.tokenLength token === byteLength text
+      , Green.tokenKind token === Name
       ]
 
 propChunking :: Property
 propChunking = forAll genText $ \text ->
   forAll (chooseInt (0, length text)) $ \n ->
     let (before, after) = splitAt n text
-        leaf s = Token (greenToken Name (Text.pack s))
-        split = greenNode Root [leaf before, Node (greenNode Group [leaf "", leaf after])]
-        whole = greenNode Root [leaf text]
+        leaf s = Token (Green.token Name (Text.pack s))
+        split = Green.node Root [leaf before, Node (Green.node Group [leaf "", leaf after])]
+        whole = Green.node Root [leaf text]
     in conjoin
-        [ renderNode split === renderNode whole
-        , nodeTextLength split === byteLength text
+        [ Green.renderNode split === Green.renderNode whole
+        , Green.nodeLength split === byteLength text
         ]
 
 propReplacement :: Model -> Model -> Property
@@ -64,12 +67,12 @@ propReplacement model new =
     case replaceAt path (compile new) (compile model) of
       Left err -> counterexample (show err) False
       Right edited -> conjoin
-        [ Text.unpack (renderElement edited) === prefix ++ source new ++ suffix
+        [ Text.unpack (Green.render edited) === prefix ++ source new ++ suffix
         , elementAt path edited === Right (compile new)
-        , elementTextLength edited + byteLength (source selected)
+        , Green.length edited + byteLength (source selected)
             === byteLength (source model) + byteLength (source new)
         , counterexample "all edited caches" (validCaches edited)
-        , Text.unpack (renderElement (compile model)) === source model
+        , Text.unpack (Green.render (compile model)) === source model
         , conjoin
             [ counterexample ("unaffected path " ++ show other) $
                 elementAt other edited === Right (compile subtree)
@@ -86,12 +89,12 @@ propKindsAndHashes model =
   in conjoin
       [ fmap id tree === tree
       , fmap (next . next) tree === fmap next (fmap next tree)
-      , renderElement (fmap fromEnum tree) === renderElement tree
-      , elementTextLength (fmap next tree) === elementTextLength tree
-      , elementKind (fmap next tree) === next (elementKind tree)
+      , Green.render (fmap fromEnum tree) === Green.render tree
+      , Green.length (fmap next tree) === Green.length tree
+      , Green.kind (fmap next tree) === next (Green.kind tree)
       , counterexample "mapped caches" (validCaches (fmap next tree))
       , hash (fmap fromEnum tree) === hash (fmap fromEnum (compile model))
-      , hash (cursorRange (rootCursor tree)) === hash (rangeFromLength 0 (byteLength (source model)))
+      , hash (Cursor.range (Cursor.fromGreen tree)) === hash (Range.fromLength 0 (byteLength (source model)))
       ]
 
 propIdentity :: Model -> Property
@@ -116,23 +119,23 @@ propInvalidPaths model new =
 
 propChildReplacement :: [Model] -> Model -> Property
 propChildReplacement children new =
-  let node = greenNode Root (map compile children)
+  let node = Green.node Root (map compile children)
   in forAll (chooseInt (-1, length children)) $ \i ->
       let expected
             | i < 0 = Left (NegativeChildBoundary i)
             | i >= length children = Left (ChildBoundaryOutOfBounds i)
             | otherwise = Right (compile (Branch Root
                 (take i children ++ [new] ++ drop (i + 1) children)))
-      in (Node <$> replaceChild i (compile new) node) === expected
+      in (Node <$> Green.replaceChild i (compile new) node) === expected
 
 -- Cursor descriptions deliberately compare an occurrence's path and range as
 -- well as its green value, so equal shared subtrees cannot be confused.
 describe :: Cursor Kind -> (Path, GreenElement Kind, TextRange)
-describe cursor = (cursorPath cursor, cursorGreen cursor, cursorRange cursor)
+describe cursor = (Cursor.path cursor, Cursor.green cursor, Cursor.range cursor)
 
 modelOccurrences :: Model -> [(Path, GreenElement Kind, TextRange)]
 modelOccurrences model =
-  [ (path, compile selected, rangeFromLength (byteLength prefix) (byteLength (source selected)))
+  [ (path, compile selected, Range.fromLength (byteLength prefix) (byteLength (source selected)))
   | (path, prefix, selected, _) <- contexts model
   ]
 
@@ -142,14 +145,14 @@ isLeaf _ = False
 
 propCursorOccurrences :: Model -> Property
 propCursorOccurrences model =
-  let cursor = rootCursor (compile model)
+  let cursor = Cursor.fromGreen (compile model)
       expected = modelOccurrences model
       leafPaths = [path | (path, _, selected, _) <- contexts model, isLeaf selected]
   in conjoin
-      [ map describe (cursorDescendants cursor) === expected
-      , map cursorPath (cursorTokens cursor) === leafPaths
+      [ map describe (Cursor.descendants cursor) === expected
+      , map Cursor.path (Cursor.tokens cursor) === leafPaths
       , conjoin
-          [ fmap describe (cursorAt path cursor) === Right occurrence
+          [ fmap describe (Cursor.at path cursor) === Right occurrence
           | occurrence@(path, _, _) <- expected
           ]
       ]
@@ -161,7 +164,7 @@ propCursorNavigation model = forAll (elements (contexts model)) $ \(path, _, sel
   cover 10 (not (null path)) "non-root" $
   cover 5 (length path > 1) "nested" $
   cover 5 (null (source selected)) "empty focus" $
-  case cursorAt path modelRoot of
+  case Cursor.at path modelRoot of
     Left err -> counterexample (show err) False
     Right focus ->
       let expectedChildren =
@@ -179,38 +182,38 @@ propCursorNavigation model = forAll (elements (contexts model)) $ \(path, _, sel
           maybeFirst [] = Nothing
           maybeFirst (value : _) = Just value
       in conjoin
-          [ describe (cursorRoot focus) === describe modelRoot
-          , map cursorPath (cursorAncestors focus) === [take n path | n <- reverse [0 .. length path]]
-          , fmap describe (cursorParent focus) === expectedParent
-          , map describe (cursorChildren focus) === expectedChildren
-          , fmap describe (cursorFirstChild focus) === maybeFirst expectedChildren
-          , fmap describe (cursorLastChild focus) === maybeFirst (reverse expectedChildren)
-          , fmap describe (cursorNextSibling focus) === expectedSibling 1
-          , fmap describe (cursorPreviousSibling focus) === expectedSibling (-1)
-          , fmap describe (cursorNextSibling focus >>= cursorPreviousSibling)
-              === (describe focus <$ cursorNextSibling focus)
-          , fmap describe (cursorPreviousSibling focus >>= cursorNextSibling)
-              === (describe focus <$ cursorPreviousSibling focus)
+          [ describe (Cursor.root focus) === describe modelRoot
+          , map Cursor.path (Cursor.ancestors focus) === [take n path | n <- reverse [0 .. length path]]
+          , fmap describe (Cursor.parent focus) === expectedParent
+          , map describe (Cursor.children focus) === expectedChildren
+          , fmap describe (Cursor.firstChild focus) === maybeFirst expectedChildren
+          , fmap describe (Cursor.lastChild focus) === maybeFirst (reverse expectedChildren)
+          , fmap describe (Cursor.nextSibling focus) === expectedSibling 1
+          , fmap describe (Cursor.previousSibling focus) === expectedSibling (-1)
+          , fmap describe (Cursor.nextSibling focus >>= Cursor.previousSibling)
+              === (describe focus <$ Cursor.nextSibling focus)
+          , fmap describe (Cursor.previousSibling focus >>= Cursor.nextSibling)
+              === (describe focus <$ Cursor.previousSibling focus)
           , case selected of
-              Leaf _ _ -> fmap cursorGreen (cursorChildAt 0 focus) === Left CannotDescendIntoToken
+              Leaf _ _ -> fmap Cursor.green (Cursor.childAt 0 focus) === Left CannotDescendIntoToken
               Branch _ kids -> conjoin
-                [ fmap describe (cursorChildAt i focus) === Right occurrence
+                [ fmap describe (Cursor.childAt i focus) === Right occurrence
                 | (i, occurrence) <- zip [0 .. length kids - 1] expectedChildren
                 ]
-          , fmap cursorGreen (cursorChildAt (-1) focus) === Left (NegativeChildIndex (-1))
+          , fmap Cursor.green (Cursor.childAt (-1) focus) === Left (NegativeChildIndex (-1))
           , conjoin
-              [ fmap cursorGreen (cursorAt relative focus)
+              [ fmap Cursor.green (Cursor.at relative focus)
                   === elementAt relative (compile selected)
               | (relative, _, _, _) <- contexts selected
               ]
           ]
   where
-    modelRoot = rootCursor (compile model)
+    modelRoot = Cursor.fromGreen (compile model)
 
 propCursorTokenNavigation :: Model -> Property
 propCursorTokenNavigation model =
   forAll (elements (contexts model)) $ \(path, _, _, _) ->
-    case cursorAt path (rootCursor (compile model)) of
+    case Cursor.at path (Cursor.fromGreen (compile model)) of
       Left err -> counterexample (show err) False
       Right focus ->
         let leafPaths = [other | (other, _, selected, _) <- contexts model, isLeaf selected]
@@ -220,18 +223,18 @@ propCursorTokenNavigation model =
             maybeHead [] = Nothing
             maybeHead (value : _) = Just value
         in conjoin
-            [ map cursorPath (cursorTokens focus) === inside
-            , fmap cursorPath (cursorFirstToken focus) === maybeHead inside
-            , fmap cursorPath (cursorLastToken focus) === maybeHead (reverse inside)
-            , fmap cursorPath (cursorNextToken focus) === maybeHead after
-            , fmap cursorPath (cursorPreviousToken focus) === maybeHead (reverse before)
+            [ map Cursor.path (Cursor.tokens focus) === inside
+            , fmap Cursor.path (Cursor.firstToken focus) === maybeHead inside
+            , fmap Cursor.path (Cursor.lastToken focus) === maybeHead (reverse inside)
+            , fmap Cursor.path (Cursor.nextToken focus) === maybeHead after
+            , fmap Cursor.path (Cursor.previousToken focus) === maybeHead (reverse before)
             ]
 
 propCursorWalk :: Model -> Property
 propCursorWalk model = conjoin
-  [ map (fmap cursorPath) (cursorWalk (rootCursor (compile model))) === walk [] model
+  [ map (fmap Cursor.path) (Cursor.walk (Cursor.fromGreen (compile model))) === walk [] model
   , conjoin
-      [ fmap (Text.unpack . cursorText) (cursorAt path (rootCursor (compile model))) === Right (source selected)
+      [ fmap (Text.unpack . Cursor.text) (Cursor.at path (Cursor.fromGreen (compile model))) === Right (source selected)
       | (path, _, selected, _) <- contexts model
       ]
   ]
@@ -245,58 +248,58 @@ propCursorWalk model = conjoin
 propCursorEditNavigation :: Model -> Model -> Model -> Property
 propCursorEditNavigation model first second =
   forAll (elements (contexts model)) $ \(path, _, _, _) ->
-    case cursorAt path (rootCursor (compile model)) of
+    case Cursor.at path (Cursor.fromGreen (compile model)) of
       Left err -> counterexample (show err) False
       Right focus ->
-        let edited = replaceFocus (compile first) focus
-            tree = cursorTree edited
-            fresh = rootCursor tree
+        let edited = Cursor.replace (compile first) focus
+            tree = Cursor.tree edited
+            fresh = Cursor.fromGreen tree
             moved =
-              [ cursorParent, cursorNextSibling, cursorPreviousSibling, cursorFirstChild, cursorLastChild
-              , \cursor -> cursorNextSibling cursor >>= cursorParent
-              , \cursor -> cursorPreviousSibling cursor >>= cursorNextSibling >>= cursorParent
+              [ Cursor.parent, Cursor.nextSibling, Cursor.previousSibling, Cursor.firstChild, Cursor.lastChild
+              , \cursor -> Cursor.nextSibling cursor >>= Cursor.parent
+              , \cursor -> Cursor.previousSibling cursor >>= Cursor.nextSibling >>= Cursor.parent
               ]
         in conjoin
-            [ map observe (cursorDescendants (cursorRoot edited)) === map observe (cursorDescendants fresh)
+            [ map observe (Cursor.descendants (Cursor.root edited)) === map observe (Cursor.descendants fresh)
             , conjoin
-                [ fmap observe (step edited) === fmap observe (either (const Nothing) step (cursorAt path fresh))
+                [ fmap observe (step edited) === fmap observe (either (const Nothing) step (Cursor.at path fresh))
                 | step <- moved
                 ]
             , conjoin
                 [ counterexample (show other) $
-                    fmap (cursorTree . replaceFocus (compile second)) (cursorAt other (cursorRoot edited))
+                    fmap (Cursor.tree . Cursor.replace (compile second)) (Cursor.at other (Cursor.root edited))
                       === (replaceAt path (compile first) (compile model) >>= replaceAt other (compile second))
                 | (other, _, _, _) <- contexts model
                 ]
-            , fmap observe (cursorParent edited >>= cursorFirstChild >>= cursorParent)
-                === fmap observe (cursorParent edited)
+            , fmap observe (Cursor.parent edited >>= Cursor.firstChild >>= Cursor.parent)
+                === fmap observe (Cursor.parent edited)
             ]
   where
-    observe cursor = (cursorPath cursor, cursorRange cursor, cursorGreen cursor)
+    observe cursor = (Cursor.path cursor, Cursor.range cursor, Cursor.green cursor)
 
 propCursorReplacement :: Model -> Model -> Property
 propCursorReplacement model replacement =
   forAll (elements (contexts model)) $ \(path, prefix, selected, suffix) ->
-    case cursorAt path (rootCursor (compile model)) of
+    case Cursor.at path (Cursor.fromGreen (compile model)) of
       Left err -> counterexample (show err) False
       Right focus ->
-        let editedFocus = replaceFocus (compile replacement) focus
-            edited = cursorTree editedFocus
-            expectedRange = rangeFromLength (byteLength prefix) (byteLength (source replacement))
+        let editedFocus = Cursor.replace (compile replacement) focus
+            edited = Cursor.tree editedFocus
+            expectedRange = Range.fromLength (byteLength prefix) (byteLength (source replacement))
         in conjoin
-            [ cursorPath editedFocus === path
-            , cursorRange editedFocus === expectedRange
-            , cursorGreen editedFocus === compile replacement
+            [ Cursor.path editedFocus === path
+            , Cursor.range editedFocus === expectedRange
+            , Cursor.green editedFocus === compile replacement
             ] .&&. conjoin
-            [ Text.unpack (renderElement edited) === prefix ++ source replacement ++ suffix
+            [ Text.unpack (Green.render edited) === prefix ++ source replacement ++ suffix
             , counterexample "rebuilt caches" (validCaches edited)
-            , fmap cursorRange (cursorAt path (rootCursor edited)) === Right expectedRange
-            , Text.unpack (renderElement (cursorGreen focus)) === source selected
-            , cursorGreen (cursorRoot focus) === compile model
+            , fmap Cursor.range (Cursor.at path (Cursor.fromGreen edited)) === Right expectedRange
+            , Text.unpack (Green.render (Cursor.green focus)) === source selected
+            , Cursor.green (Cursor.root focus) === compile model
             , conjoin
-                [ fmap describe (cursorAt other (rootCursor edited))
+                [ fmap describe (Cursor.at other (Cursor.fromGreen edited))
                     === Right (other, compile subtree,
-                      rangeFromLength expectedStart (byteLength (source subtree)))
+                      Range.fromLength expectedStart (byteLength (source subtree)))
                 | (other, otherPrefix, subtree, _) <- contexts model
                 , not (path `isPrefixOf` other || other `isPrefixOf` path)
                 , let shift = if other > path
@@ -311,16 +314,16 @@ propCursorInvalidPaths model = forAll (elements (contexts model)) $ \(path, _, s
   let (index, err) = case selected of
         Leaf _ _ -> (0, CannotDescendIntoToken)
         Branch _ kids -> (length kids, ChildIndexOutOfBounds (length kids))
-      cursor = rootCursor (compile model)
+      cursor = Cursor.fromGreen (compile model)
   in conjoin
-      [ fmap cursorGreen (cursorAt (path ++ [index]) cursor) === Left err
-      , fmap cursorGreen (cursorAt (path ++ [-1]) cursor) === Left (NegativeChildIndex (-1))
+      [ fmap Cursor.green (Cursor.at (path ++ [index]) cursor) === Left err
+      , fmap Cursor.green (Cursor.at (path ++ [-1]) cursor) === Left (NegativeChildIndex (-1))
       ]
 
 offsetPaths :: TokenAtOffset (Cursor Kind) -> TokenAtOffset Path
 offsetPaths NoToken = NoToken
-offsetPaths (SingleToken cursor) = SingleToken (cursorPath cursor)
-offsetPaths (BetweenTokens left right) = BetweenTokens (cursorPath left) (cursorPath right)
+offsetPaths (SingleToken cursor) = SingleToken (Cursor.path cursor)
+offsetPaths (BetweenTokens left right) = BetweenTokens (Cursor.path left) (Cursor.path right)
 
 propCursorOffsetLookup :: Model -> Property
 propCursorOffsetLookup model =
@@ -339,9 +342,9 @@ propCursorOffsetLookup model =
           [] -> NoToken
           [path] -> SingleToken path
           left : right : _ -> BetweenTokens left right
-    in case cursorAt scope (rootCursor (compile model)) of
+    in case Cursor.at scope (Cursor.fromGreen (compile model)) of
         Left err -> counterexample (show err) False
-        Right focus -> offsetPaths (tokenAtOffset offset focus) === expected
+        Right focus -> offsetPaths (Cursor.tokenAt offset focus) === expected
 
 propCoveringRange :: Model -> Property
 propCoveringRange model =
@@ -349,7 +352,7 @@ propCoveringRange model =
   forAll (chooseInteger (0, toInteger len + 1)) $ \b ->
     let start = fromInteger (min a b)
         end = fromInteger (max a b)
-        query = rangeFromLength start (end - start)
+        query = Range.fromLength start (end - start)
         containing =
           [ path
           | (path, prefix, selected, _) <- contexts model
@@ -364,7 +367,7 @@ propCoveringRange model =
         descend current candidate
           | current `isPrefixOf` candidate = candidate
           | otherwise = current
-    in fmap cursorPath (coveringElement query (rootCursor (compile model))) === expected
+    in fmap Cursor.path (Cursor.covering query (Cursor.fromGreen (compile model))) === expected
   where
     len = byteLength (source model)
 
@@ -373,108 +376,108 @@ propRanges (NonNegative rawStart) (NonNegative rawLen) (NonNegative rawPoint) =
   let start = fromInteger rawStart
       len = fromInteger rawLen
       point = fromInteger rawPoint
-      range = rangeFromLength start len
+      range = Range.fromLength start len
   in conjoin
-      [ rangeStart range === start
-      , rangeEnd range === start + len
-      , rangeLength range === len
-      , rangeIsEmpty range === (len == 0)
-      , textRange start (start + len) === Just range
-      , rangeContains point range === (start <= point && point < start + len)
-      , rangeContainsRange range (rangeFromLength (start + len) 0) === True
-      , if len > 0 then textRange (start + len) start === Nothing else property True
+      [ Range.start range === start
+      , Range.end range === start + len
+      , Range.length range === len
+      , Range.isEmpty range === (len == 0)
+      , Range.fromEnds start (start + len) === Just range
+      , Range.contains point range === (start <= point && point < start + len)
+      , Range.containsRange range (Range.fromLength (start + len) 0) === True
+      , if len > 0 then Range.fromEnds (start + len) start === Nothing else property True
       ]
 
 cursorRegressions :: Property
 cursorRegressions = once $ conjoin
-  [ map cursorPath (cursorTokens tree) === [[1, 0], [1, 1], [2], [3, 0], [3, 1], [5], [6]]
-  , fmap cursorPath (cursorFirstToken tree) === Just [1, 0]
-  , fmap cursorPath (cursorLastToken tree) === Just [6]
-  , fmap cursorPath (cursorFirstChild tree >>= cursorNextToken) === Just [1, 0]
-  , fmap cursorPath (cursorLastChild tree >>= cursorPreviousToken) === Just [5]
-  , atPath [1, 1] (fmap cursorPath . cursorNextToken) (Just [2])
-  , atPath [2] (fmap cursorPath . cursorNextToken) (Just [3, 0])
-  , atPath [5] (fmap cursorPath . cursorPreviousToken) (Just [3, 1])
-  , atPath [3] (fmap cursorPath . cursorPreviousToken) (Just [2])
-  , atPath [3] (fmap cursorPath . cursorNextToken) (Just [5])
-  , atPath [3, 0] cursorRange (rangeFromLength 1 4)
-  , offsetPaths (tokenAtOffset 0 tree) === SingleToken [1, 1]
-  , offsetPaths (tokenAtOffset 1 tree) === BetweenTokens [1, 1] [3, 0]
-  , offsetPaths (tokenAtOffset 3 tree) === SingleToken [3, 0]
-  , offsetPaths (tokenAtOffset 5 tree) === BetweenTokens [3, 0] [5]
-  , offsetPaths (tokenAtOffset 6 tree) === SingleToken [5]
-  , offsetPaths (tokenAtOffset 7 tree) === NoToken
-  , atPath [3] (offsetPaths . tokenAtOffset 1) (SingleToken [3, 0])
-  , atPath [3] (offsetPaths . tokenAtOffset 0) NoToken
-  , fmap cursorPath (coveringElement (rangeFromLength 0 0) tree) === Just [0]
-  , fmap cursorPath (coveringElement (rangeFromLength 1 0) tree) === Just [1, 1]
-  , fmap cursorPath (coveringElement (rangeFromLength 6 0) tree) === Just [5]
-  , fmap cursorPath (coveringElement (rangeFromLength 1 4) tree) === Just [3, 0]
-  , fmap cursorPath (coveringElement (rangeFromLength 0 5) tree) === Just []
-  , fmap cursorPath (coveringElement (rangeFromLength 6 1) tree) === Nothing
-  , tokensEmpty (rootCursor (Node (greenNode Group [])))
-  , offsetPaths (tokenAtOffset 0 (rootCursor (tok ""))) === NoToken
-  , fmap cursorPath (cursorFirstToken (rootCursor (tok ""))) === Just []
-  , cursorRange sharedSecond === rangeFromLength 1 1
+  [ map Cursor.path (Cursor.tokens tree) === [[1, 0], [1, 1], [2], [3, 0], [3, 1], [5], [6]]
+  , fmap Cursor.path (Cursor.firstToken tree) === Just [1, 0]
+  , fmap Cursor.path (Cursor.lastToken tree) === Just [6]
+  , fmap Cursor.path (Cursor.firstChild tree >>= Cursor.nextToken) === Just [1, 0]
+  , fmap Cursor.path (Cursor.lastChild tree >>= Cursor.previousToken) === Just [5]
+  , atPath [1, 1] (fmap Cursor.path . Cursor.nextToken) (Just [2])
+  , atPath [2] (fmap Cursor.path . Cursor.nextToken) (Just [3, 0])
+  , atPath [5] (fmap Cursor.path . Cursor.previousToken) (Just [3, 1])
+  , atPath [3] (fmap Cursor.path . Cursor.previousToken) (Just [2])
+  , atPath [3] (fmap Cursor.path . Cursor.nextToken) (Just [5])
+  , atPath [3, 0] Cursor.range (Range.fromLength 1 4)
+  , offsetPaths (Cursor.tokenAt 0 tree) === SingleToken [1, 1]
+  , offsetPaths (Cursor.tokenAt 1 tree) === BetweenTokens [1, 1] [3, 0]
+  , offsetPaths (Cursor.tokenAt 3 tree) === SingleToken [3, 0]
+  , offsetPaths (Cursor.tokenAt 5 tree) === BetweenTokens [3, 0] [5]
+  , offsetPaths (Cursor.tokenAt 6 tree) === SingleToken [5]
+  , offsetPaths (Cursor.tokenAt 7 tree) === NoToken
+  , atPath [3] (offsetPaths . Cursor.tokenAt 1) (SingleToken [3, 0])
+  , atPath [3] (offsetPaths . Cursor.tokenAt 0) NoToken
+  , fmap Cursor.path (Cursor.covering (Range.fromLength 0 0) tree) === Just [0]
+  , fmap Cursor.path (Cursor.covering (Range.fromLength 1 0) tree) === Just [1, 1]
+  , fmap Cursor.path (Cursor.covering (Range.fromLength 6 0) tree) === Just [5]
+  , fmap Cursor.path (Cursor.covering (Range.fromLength 1 4) tree) === Just [3, 0]
+  , fmap Cursor.path (Cursor.covering (Range.fromLength 0 5) tree) === Just []
+  , fmap Cursor.path (Cursor.covering (Range.fromLength 6 1) tree) === Nothing
+  , tokensEmpty (Cursor.fromGreen (Node (Green.node Group [])))
+  , offsetPaths (Cursor.tokenAt 0 (Cursor.fromGreen (tok ""))) === NoToken
+  , fmap Cursor.path (Cursor.firstToken (Cursor.fromGreen (tok ""))) === Just []
+  , Cursor.range sharedSecond === Range.fromLength 1 1
   -- Abstract values show as the public calls that rebuild them.
-  , show (Just (rangeFromLength 5 3)) === "Just (rangeFromLength 5 3)"
-  , show (Node (greenNode Group [Token (greenToken Space "\t")]))
-      === "Node (greenNode Group [Token (greenToken Space \"\\t\")])"
-  , cursorPath sharedSecond === [1]
-  , cursorGreen sharedSecond === shared
-  , renderElement (cursorTree (replaceFocus (tok "long") sharedSecond)) === "along"
-  , cursorRange sharedSecond === rangeFromLength 1 1
-  , rangeEnd (cursorRange hugeCursor) === 2 ^ hugeDepth
-  , offsetPaths (tokenAtOffset (2 ^ hugeDepth) hugeCursor)
+  , show (Just (Range.fromLength 5 3)) === "Just (Range.fromLength 5 3)"
+  , show (Node (Green.node Group [Token (Green.token Space "\t")]))
+      === "Node (Green.node Group [Token (Green.token Space \"\\t\")])"
+  , Cursor.path sharedSecond === [1]
+  , Cursor.green sharedSecond === shared
+  , Green.render (Cursor.tree (Cursor.replace (tok "long") sharedSecond)) === "along"
+  , Cursor.range sharedSecond === Range.fromLength 1 1
+  , Range.end (Cursor.range hugeCursor) === 2 ^ hugeDepth
+  , offsetPaths (Cursor.tokenAt (2 ^ hugeDepth) hugeCursor)
       === SingleToken (replicate hugeDepth 1)
   ]
   where
-    tok = Token . greenToken Name
-    empty = Node (greenNode Group [])
-    tree = rootCursor (Node (greenNode Root
-      [ empty, Node (greenNode Group [tok "", tok "a", empty]), tok ""
-      , Node (greenNode Group [tok "😀", tok ""]), empty, tok "b", tok ""
+    tok = Token . Green.token Name
+    empty = Node (Green.node Group [])
+    tree = Cursor.fromGreen (Node (Green.node Root
+      [ empty, Node (Green.node Group [tok "", tok "a", empty]), tok ""
+      , Node (Green.node Group [tok "😀", tok ""]), empty, tok "b", tok ""
       ]))
-    atPath path inspect expected = case cursorAt path tree of
+    atPath path inspect expected = case Cursor.at path tree of
       Left err -> counterexample (show err) False
       Right focus -> inspect focus === expected
     tokensEmpty cursor = conjoin
-      [ map cursorPath (cursorTokens cursor) === []
-      , fmap cursorPath (cursorFirstToken cursor) === Nothing
-      , fmap cursorPath (cursorLastToken cursor) === Nothing
-      , offsetPaths (tokenAtOffset 0 cursor) === NoToken
+      [ map Cursor.path (Cursor.tokens cursor) === []
+      , fmap Cursor.path (Cursor.firstToken cursor) === Nothing
+      , fmap Cursor.path (Cursor.lastToken cursor) === Nothing
+      , offsetPaths (Cursor.tokenAt 0 cursor) === NoToken
       ]
-    shared = Node (greenNode Group [tok "a"])
-    sharedSecond = case cursorChildAt 1 (rootCursor (Node (greenNode Root [shared, shared]))) of
+    shared = Node (Green.node Group [tok "a"])
+    sharedSecond = case Cursor.childAt 1 (Cursor.fromGreen (Node (Green.node Root [shared, shared]))) of
       Right cursor -> cursor
       Left err -> error (show err)
-    hugeCursor = rootCursor (iterate (\child -> Node (greenNode Group [child, child])) (tok "x") !! hugeDepth)
+    hugeCursor = Cursor.fromGreen (iterate (\child -> Node (Green.node Group [child, child])) (tok "x") !! hugeDepth)
 
 regressions :: Property
 regressions = once $ conjoin
-  [ renderNode empty === ""
-  , nodeTextLength empty === 0
-  , renderNode original === "x\t{- keep -}\r\n😀e\x0301\0"
-  , nodeTextLength original === 22
-  , fmap renderNode (replaceChild 0 (tok "y") original)
+  [ Green.renderNode empty === ""
+  , Green.nodeLength empty === 0
+  , Green.renderNode original === "x\t{- keep -}\r\n😀e\x0301\0"
+  , Green.nodeLength original === 22
+  , fmap Green.renderNode (Green.replaceChild 0 (tok "y") original)
       === Right "y\t{- keep -}\r\n😀e\x0301\0"
-  , elementTextLength huge === 2 ^ hugeDepth
-  , nodeKind original === Root
-  , elementKind (tok "x") === Name
-  , fmap renderElement (replaceAt [] (tok "new") (Node original)) === Right "new"
-  , replaceChild maxBound (tok "x") empty === Left (ChildBoundaryOutOfBounds maxBound)
+  , Green.length huge === 2 ^ hugeDepth
+  , Green.nodeKind original === Root
+  , Green.kind (tok "x") === Name
+  , fmap Green.render (replaceAt [] (tok "new") (Node original)) === Right "new"
+  , Green.replaceChild maxBound (tok "x") empty === Left (ChildBoundaryOutOfBounds maxBound)
   ]
   where
-    empty = greenNode Root []
-    tok = Token . greenToken Name
-    original = greenNode Root
+    empty = Green.node Root []
+    tok = Token . Green.token Name
+    original = Green.node Root
       [ tok "x"
-      , Token (greenToken Space "\t")
-      , Token (greenToken Comment "{- keep -}")
-      , Node (greenNode Group [tok "\r\n", tok "😀e\x0301\0", tok ""])
+      , Token (Green.token Space "\t")
+      , Token (Green.token Comment "{- keep -}")
+      , Node (Green.node Group [tok "\r\n", tok "😀e\x0301\0", tok ""])
       ]
     -- A tiny shared DAG with a logical size above Word64. Never render it.
-    huge = iterate (\child -> Node (greenNode Group [child, child])) (tok "x") !! hugeDepth
+    huge = iterate (\child -> Node (Green.node Group [child, child])) (tok "x") !! hugeDepth
 
 main :: IO ()
 main = do

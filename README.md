@@ -23,27 +23,31 @@ module Main (main) where
 
 import qualified Data.Text.IO as Text
 import Graft
+import qualified Graft.Build as Build
+import qualified Graft.Cursor as Cursor
+import qualified Graft.Green as Green
+import qualified Graft.Range as Range
 
 data Kind = Root | Binding | Name | Number | Trivia
   deriving (Eq, Show)
 
 -- A parser would emit these events; here they are written by hand.
 parsed :: Either BuilderError (GreenNode Kind)
-parsed = execBuild $ buildNode Root $ do
-  buildNode Binding $ do
-    buildToken Name "x"
-    buildToken Trivia "  = "
-    buildToken Number "1"
-  buildToken Trivia " -- keep\r\n"
+parsed = Build.exec $ Build.node Root $ do
+  Build.node Binding $ do
+    Build.token Name "x"
+    Build.token Trivia "  = "
+    Build.token Number "1"
+  Build.token Trivia " -- keep\r\n"
 
 main :: IO ()
 main = do
   tree <- either (fail . show) pure parsed
-  Text.putStr (renderNode tree)
-  case coveringElement (rangeFromLength 5 1) (rootCursor (Node tree)) of
+  Text.putStr (Green.renderNode tree)
+  case Cursor.covering (Range.fromLength 5 1) (Cursor.fromGreen (Node tree)) of
     Just number -> do
-      let edited = replaceFocus (Token (greenToken Number "42")) number
-      Text.putStr (renderElement (cursorTree edited))
+      let edited = Cursor.replace (Token (Green.token Number "42")) number
+      Text.putStr (Green.render (Cursor.tree edited))
     Nothing -> fail "nothing at offset 5"
 ```
 
@@ -61,25 +65,27 @@ The double space, the comment and the CRLF line ending survive the edit.
 - **Green trees** (`Graft.Green`) are immutable nodes and tokens tagged with
   your own syntax-kind type. Each node caches its length in UTF-8 bytes and the
   offset of each child, so length and child lookups don't traverse anything.
-  Equal subtrees can be shared.
+  Equal subtrees can be shared. A node's children can be replaced, inserted and
+  removed; to edit inside a tree, go through a cursor.
 - **Cursors** (`Graft.Cursor`) are zippers over a green tree. They know their
   parent, siblings and absolute byte range. You can find tokens by offset, and
   edit through a cursor and keep navigating the edited tree; old cursors keep
   seeing the old tree.
-- **Builders** (`Graft.Builder`) turn a parser's start/token/finish events into a
-  tree. Checkpoints let a parser wrap elements it has already emitted, as an
-  operator-precedence parser needs to.
+- **Builders** (`Graft.Build`, `Graft.Builder`) turn a parser's start/token/finish
+  events into a tree, in a monad or as a pure value. Checkpoints let a parser
+  wrap elements it has already emitted, as an operator-precedence parser needs
+  to.
 - **Typed views** (`Graft.Ast`) are newtypes over cursors that give your
   grammar's nodes typed accessors, without building a separate AST.
-- **Child edits** (`Graft.Edit`) replace, insert and remove the children of a
-  green node; to edit inside a tree, go through a cursor. **Byte ranges**
-  (`Graft.Range`) describe where things are.
+- **Byte ranges** (`Graft.Range`) describe where things are.
 - **Line index** (`Graft.LineIndex`) converts byte offsets to and from line and
   column positions, including the UTF-16 columns used by the Language Server
   Protocol.
 
-Import `Graft` for everything, or the individual modules. All offsets and
-lengths are `TextLength`, a count of UTF-8 bytes, never characters.
+`Graft` exports the types and classes. The functions have short names meant
+for qualified import, as in the example: `Cursor.parent`, `Green.node`,
+`Range.start`. All offsets and lengths are `TextLength`, a count of UTF-8
+bytes, never characters.
 
 ## Learn more
 

@@ -7,48 +7,52 @@ import Data.List (find, inits)
 import Data.Maybe (listToMaybe)
 import qualified Data.Text as Text
 import Graft
+import qualified Graft.Ast as Ast
+import qualified Graft.Cursor as Cursor
+import qualified Graft.Green as Green
+import qualified Graft.Range as Range
 import Test.QuickCheck
 import TestModel
 
 newtype GroupView = GroupView (Cursor Kind)
 instance AstNode GroupView where
   type AstNodeKind GroupView = Kind
-  castNode = matchNode (== Group) GroupView
+  castNode = Ast.matchNode (== Group) GroupView
   nodeSyntax (GroupView cursor) = cursor
 
 newtype AnyNode = AnyNode (Cursor Kind)
 instance AstNode AnyNode where
   type AstNodeKind AnyNode = Kind
-  castNode = matchNode (const True) AnyNode
+  castNode = Ast.matchNode (const True) AnyNode
   nodeSyntax (AnyNode cursor) = cursor
 
 newtype NameView = NameView (Cursor Kind)
 instance AstToken NameView where
   type AstTokenKind NameView = Kind
-  castToken = matchToken (== Name) NameView
+  castToken = Ast.matchToken (== Name) NameView
   tokenSyntax (NameView cursor) = cursor
 
 newtype AnyToken = AnyToken (Cursor Kind)
 instance AstToken AnyToken where
   type AstTokenKind AnyToken = Kind
-  castToken = matchToken (const True) AnyToken
+  castToken = Ast.matchToken (const True) AnyToken
   tokenSyntax (AnyToken cursor) = cursor
 
 type Observation = (Path, TextRange, GreenElement Kind, GreenElement Kind)
 
 observe :: Cursor Kind -> Observation
-observe cursor = (cursorPath cursor, cursorRange cursor, cursorGreen cursor,
-  cursorGreen (cursorRoot cursor))
+observe cursor = (Cursor.path cursor, Cursor.range cursor, Cursor.green cursor,
+  Cursor.green (Cursor.root cursor))
 
 oracle :: Model -> Path -> Observation
 oracle model path = case find (\(candidate, _, _, _) -> candidate == path) (contexts model) of
   Just (_, prefix, selected, _) ->
-    (path, rangeFromLength (byteLength prefix) (byteLength (source selected)), compile selected, compile model)
+    (path, Range.fromLength (byteLength prefix) (byteLength (source selected)), compile selected, compile model)
   Nothing -> error "invalid oracle path"
 
 propCasting :: Model -> Property
 propCasting model = conjoin
-  [ case cursorAt path (rootCursor (compile model)) of
+  [ case Cursor.at path (Cursor.fromGreen (compile model)) of
       Left err -> counterexample (show err) False
       Right cursor ->
         let expected = oracle model path
@@ -73,7 +77,7 @@ propCasting model = conjoin
 
 propFields :: Model -> Property
 propFields model = conjoin
-  [ case cursorAt path (rootCursor (compile model)) of
+  [ case Cursor.at path (Cursor.fromGreen (compile model)) of
       Left err -> counterexample (show err) False
       Right cursor ->
         let items = case selected of Branch _ xs -> xs; Leaf _ _ -> []
@@ -82,19 +86,19 @@ propFields model = conjoin
             leaves = [oracle model (path ++ [index]) | (index, Leaf _ _) <- zip [0 ..] items]
             names = [oracle model (path ++ [index]) | (index, Leaf Name _) <- zip [0 ..] items]
         in conjoin
-          [ map (observe . nodeSyntax) (astChildren cursor :: [AnyNode]) === nodes
-          , map (observe . nodeSyntax) (astChildren cursor :: [GroupView]) === groups
-          , fmap (observe . nodeSyntax) (astChild cursor :: Maybe GroupView) === listToMaybe groups
-          , map (observe . tokenSyntax) (astTokens cursor :: [AnyToken]) === leaves
-          , map (observe . tokenSyntax) (astTokens cursor :: [NameView]) === names
-          , fmap (observe . tokenSyntax) (astToken cursor :: Maybe NameView) === listToMaybe names
+          [ map (observe . nodeSyntax) (Ast.children cursor :: [AnyNode]) === nodes
+          , map (observe . nodeSyntax) (Ast.children cursor :: [GroupView]) === groups
+          , fmap (observe . nodeSyntax) (Ast.child cursor :: Maybe GroupView) === listToMaybe groups
+          , map (observe . tokenSyntax) (Ast.tokens cursor :: [AnyToken]) === leaves
+          , map (observe . tokenSyntax) (Ast.tokens cursor :: [NameView]) === names
+          , fmap (observe . tokenSyntax) (Ast.token cursor :: Maybe NameView) === listToMaybe names
           ]
   | (path, _, selected, _) <- contexts model
   ]
 
 propParents :: Model -> Property
 propParents model = conjoin
-  [ case cursorAt path (rootCursor (compile model)) of
+  [ case Cursor.at path (Cursor.fromGreen (compile model)) of
       Left err -> counterexample (show err) False
       Right cursor ->
         let above = reverse (take (length path) (inits path))
@@ -105,10 +109,10 @@ propParents model = conjoin
               Just p | p `elem` map (\(candidate, _, _, _) -> candidate) groups -> Just (oracle model p)
               _ -> Nothing
         in conjoin
-          [ fmap (observe . nodeSyntax) (astParent cursor :: Maybe AnyNode) === fmap (oracle model) immediate
-          , fmap (observe . nodeSyntax) (astParent cursor :: Maybe GroupView) === parentGroup
-          , map (observe . nodeSyntax) (astAncestors cursor :: [AnyNode]) === map (oracle model) above
-          , map (observe . nodeSyntax) (astAncestors cursor :: [GroupView]) === groups
+          [ fmap (observe . nodeSyntax) (Ast.parent cursor :: Maybe AnyNode) === fmap (oracle model) immediate
+          , fmap (observe . nodeSyntax) (Ast.parent cursor :: Maybe GroupView) === parentGroup
+          , map (observe . nodeSyntax) (Ast.ancestors cursor :: [AnyNode]) === map (oracle model) above
+          , map (observe . nodeSyntax) (Ast.ancestors cursor :: [GroupView]) === groups
           ]
   | (path, _, _, _) <- contexts model
   ]
@@ -122,10 +126,10 @@ modelReplace _ _ (Leaf _ _) = error "invalid oracle path"
 matches :: Model -> GreenElement Kind -> Property
 matches expected edited = conjoin
   [ edited === compile expected
-  , Text.unpack (renderElement edited) === source expected
+  , Text.unpack (Green.render edited) === source expected
   , counterexample "cache invariant" (validCaches edited)
   , conjoin
-      [ fmap observe (cursorAt path (rootCursor edited)) === Right (oracle expected path)
+      [ fmap observe (Cursor.at path (Cursor.fromGreen edited)) === Right (oracle expected path)
       | (path, _, _, _) <- contexts expected
       ]
   ]
@@ -135,17 +139,17 @@ propTokenEdit subtree = forAll genText $ \newText ->
   let model = Branch Root [Leaf Name "λ", subtree, Leaf Name "tail"]
       root = compile model
   in forAll (elements [context | context@(_, _, Leaf Name _, _) <- contexts model]) $
-    \(path, prefix, selected, suffix) -> case cursorAt path (rootCursor root) of
+    \(path, prefix, selected, suffix) -> case Cursor.at path (Cursor.fromGreen root) of
       Left err -> counterexample (show err) False
       Right cursor -> case castToken cursor :: Maybe NameView of
         Nothing -> counterexample "name view failed" False
         Just view ->
-          let edited = cursorTree (replaceFocus (compile (Leaf Name newText)) (tokenSyntax view))
+          let edited = Cursor.tree (Cursor.replace (compile (Leaf Name newText)) (tokenSyntax view))
           in conjoin
             [ matches (modelReplace path (Leaf Name newText) model) edited
-            , Text.unpack (renderElement edited) === prefix ++ newText ++ suffix
+            , Text.unpack (Green.render edited) === prefix ++ newText ++ suffix
             , observe (tokenSyntax view) === oracle model path
-            , Text.unpack (renderElement (cursorGreen (tokenSyntax view))) === source selected
+            , Text.unpack (Green.render (Cursor.green (tokenSyntax view))) === source selected
             ]
 
 propNodeEdit :: Model -> Model -> Property
@@ -154,11 +158,11 @@ propNodeEdit subtree replacement =
       root = compile model
   in forAll (elements [(path, kind, items) | (path, _, Branch kind items, _) <- contexts model]) $
     \(path, kind, items) -> forAll (chooseInt (0, length items)) $ \index ->
-      case cursorAt path (rootCursor root) of
+      case Cursor.at path (Cursor.fromGreen root) of
         Left err -> counterexample (show err) False
         Right cursor -> case castNode cursor :: Maybe AnyNode of
           Nothing -> counterexample "node view failed" False
-          Just view -> case cursorTree <$> insertChildFocus index (compile replacement) (nodeSyntax view) of
+          Just view -> case Cursor.tree <$> Cursor.insertChild index (compile replacement) (nodeSyntax view) of
             Left err -> counterexample (show err) False
             Right edited -> conjoin
               [ matches (modelReplace path (Branch kind (take index items ++ [replacement] ++ drop index items)) model) edited
@@ -169,44 +173,44 @@ propNodeEdit subtree replacement =
 newtype StopNode = StopNode (Cursor Kind)
 instance AstNode StopNode where
   type AstNodeKind StopNode = Kind
-  castNode = matchNode (\kind -> if kind == Comment then error "later node cast forced" else kind == Group) StopNode
+  castNode = Ast.matchNode (\kind -> if kind == Comment then error "later node cast forced" else kind == Group) StopNode
   nodeSyntax (StopNode cursor) = cursor
 
 newtype StopToken = StopToken (Cursor Kind)
 instance AstToken StopToken where
   type AstTokenKind StopToken = Kind
-  castToken = matchToken (\kind -> if kind == Space then error "later token cast forced" else kind == Name) StopToken
+  castToken = Ast.matchToken (\kind -> if kind == Space then error "later token cast forced" else kind == Name) StopToken
   tokenSyntax (StopToken cursor) = cursor
 
 regressions :: Property
 regressions = once $ conjoin
-  [ fmap (cursorPath . nodeSyntax) (castNode emptyGroup :: Maybe GroupView) === Just []
-  , fmap (cursorPath . tokenSyntax) (astToken emptyGroup :: Maybe NameView) === Nothing
-  , fmap (cursorPath . tokenSyntax) (castToken (rootCursor (tok "")) :: Maybe NameView) === Just []
-  , fmap (cursorPath . tokenSyntax) (castToken (rootCursor (Node (greenNode Name []))) :: Maybe NameView) === Nothing
-  , fmap (cursorPath . nodeSyntax) (castNode (rootCursor (Token (greenToken Group "bad"))) :: Maybe GroupView) === Nothing
-  , map (cursorPath . nodeSyntax) (astChildren sharedRoot :: [GroupView]) === [[0], [1]]
-  , map (cursorRange . nodeSyntax) (astChildren sharedRoot :: [GroupView])
-      === [rangeFromLength 0 2, rangeFromLength 2 2]
-  , fmap (cursorPath . tokenSyntax) (astToken sharedRoot :: Maybe NameView) === Nothing
-  , map (cursorPath . tokenSyntax) (astTokens (rootCursor (tok "x")) :: [NameView]) === []
-  , fmap (cursorPath . nodeSyntax) (astChild lazyRoot :: Maybe StopNode) === Just [0]
-  , fmap (cursorPath . tokenSyntax) (astToken lazyRoot :: Maybe StopToken) === Just [2]
-  , matchNode (error "token must not check node predicate") (const ()) (rootCursor (tok "x")) === Nothing
-  , matchToken (error "node must not check token predicate") (const ()) emptyGroup === Nothing
-  , fmap (cursorRange . nodeSyntax) (castNode hugeRoot :: Maybe GroupView)
-      === Just (rangeFromLength 0 (2 ^ hugeDepth))
-  , fmap (cursorRange . nodeSyntax) (astChild hugeRoot :: Maybe GroupView)
-      === Just (rangeFromLength 0 (2 ^ (hugeDepth - 1)))
+  [ fmap (Cursor.path . nodeSyntax) (castNode emptyGroup :: Maybe GroupView) === Just []
+  , fmap (Cursor.path . tokenSyntax) (Ast.token emptyGroup :: Maybe NameView) === Nothing
+  , fmap (Cursor.path . tokenSyntax) (castToken (Cursor.fromGreen (tok "")) :: Maybe NameView) === Just []
+  , fmap (Cursor.path . tokenSyntax) (castToken (Cursor.fromGreen (Node (Green.node Name []))) :: Maybe NameView) === Nothing
+  , fmap (Cursor.path . nodeSyntax) (castNode (Cursor.fromGreen (Token (Green.token Group "bad"))) :: Maybe GroupView) === Nothing
+  , map (Cursor.path . nodeSyntax) (Ast.children sharedRoot :: [GroupView]) === [[0], [1]]
+  , map (Cursor.range . nodeSyntax) (Ast.children sharedRoot :: [GroupView])
+      === [Range.fromLength 0 2, Range.fromLength 2 2]
+  , fmap (Cursor.path . tokenSyntax) (Ast.token sharedRoot :: Maybe NameView) === Nothing
+  , map (Cursor.path . tokenSyntax) (Ast.tokens (Cursor.fromGreen (tok "x")) :: [NameView]) === []
+  , fmap (Cursor.path . nodeSyntax) (Ast.child lazyRoot :: Maybe StopNode) === Just [0]
+  , fmap (Cursor.path . tokenSyntax) (Ast.token lazyRoot :: Maybe StopToken) === Just [2]
+  , Ast.matchNode (error "token must not check node predicate") (const ()) (Cursor.fromGreen (tok "x")) === Nothing
+  , Ast.matchToken (error "node must not check token predicate") (const ()) emptyGroup === Nothing
+  , fmap (Cursor.range . nodeSyntax) (castNode hugeRoot :: Maybe GroupView)
+      === Just (Range.fromLength 0 (2 ^ hugeDepth))
+  , fmap (Cursor.range . nodeSyntax) (Ast.child hugeRoot :: Maybe GroupView)
+      === Just (Range.fromLength 0 (2 ^ (hugeDepth - 1)))
   ]
   where
-    tok = Token . greenToken Name
-    emptyGroup = rootCursor (Node (greenNode Group []))
-    shared = Node (greenNode Group [tok "λ", tok ""])
-    sharedRoot = rootCursor (Node (greenNode Root [shared, shared]))
-    lazyRoot = rootCursor (Node (greenNode Root
-      [ Node (greenNode Group []), Node (greenNode Comment []), tok "x", Token (greenToken Space " ") ]))
-    hugeRoot = rootCursor (iterate (\element -> Node (greenNode Group [element, element])) (tok "x") !! hugeDepth)
+    tok = Token . Green.token Name
+    emptyGroup = Cursor.fromGreen (Node (Green.node Group []))
+    shared = Node (Green.node Group [tok "λ", tok ""])
+    sharedRoot = Cursor.fromGreen (Node (Green.node Root [shared, shared]))
+    lazyRoot = Cursor.fromGreen (Node (Green.node Root
+      [ Node (Green.node Group []), Node (Green.node Comment []), tok "x", Token (Green.token Space " ") ]))
+    hugeRoot = Cursor.fromGreen (iterate (\element -> Node (Green.node Group [element, element])) (tok "x") !! hugeDepth)
 
 astProperties :: [(String, Property)]
 astProperties =
