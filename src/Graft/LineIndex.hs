@@ -25,6 +25,7 @@ module Graft.LineIndex
 
 import Control.DeepSeq (NFData (..))
 import Data.Bits ((.&.))
+import Data.Hashable (Hashable (..))
 import Data.Primitive.PrimArray
 import Data.Text (Text)
 import qualified Data.Text.Array as Array
@@ -52,6 +53,9 @@ data Position = Position
 
 instance NFData Position where
   rnf (Position _ _) = ()
+
+instance Hashable Position where
+  hashWithSalt salt (Position line column) = salt `hashWithSalt` line `hashWithSalt` column
 
 -- | Index the lines of a text, in time proportional to its length.
 lineIndex :: Text -> LineIndex

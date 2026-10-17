@@ -40,6 +40,7 @@ library
     build-depends:
         base >=4.19 && <4.23,
         deepseq >=1.5 && <1.6,
+        hashable >=1.4 && <1.6,
         primitive >=0.8 && <0.10,
         text >=2.0 && <2.2
     hs-source-dirs:   src
@@ -69,6 +70,7 @@ test-suite graft-tests
     build-depends:
         base >=4.19 && <4.23,
         graft,
+        hashable >=1.4 && <1.6,
         QuickCheck >=2.14 && <2.19,
         text >=2.0 && <2.2
     default-language: Haskell2010

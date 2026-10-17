@@ -13,6 +13,7 @@ module Graft.Range
   ) where
 
 import Control.DeepSeq (NFData (..))
+import Data.Hashable (Hashable (..))
 import Graft.Green (TextLength)
 
 -- | A half-open interval with start no greater than end. The constructor is
@@ -27,6 +28,9 @@ instance Show TextRange where
 
 instance NFData TextRange where
   rnf (TextRange _ _) = ()
+
+instance Hashable TextRange where
+  hashWithSalt salt (TextRange start end) = salt `hashWithSalt` start `hashWithSalt` end
 
 -- | Construct a range from start and end, rejecting reversed endpoints.
 textRange :: TextLength -> TextLength -> Maybe TextRange

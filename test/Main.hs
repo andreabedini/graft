@@ -7,6 +7,7 @@ import BuilderTests (builderProperties)
 import ChildEditTests (childEditProperties)
 import LineIndexTests (lineIndexProperties)
 import Control.Monad (unless)
+import Data.Hashable (hash)
 import Data.List (find, isPrefixOf)
 import qualified Data.Text as Text
 import Graft
@@ -76,6 +77,22 @@ propReplacement model new =
             , not (path `isPrefixOf` other || other `isPrefixOf` path)
             ]
         ]
+
+-- Mapping kinds keeps text and caches; equal trees built separately hash alike.
+propKindsAndHashes :: Model -> Property
+propKindsAndHashes model =
+  let tree = compile model
+      next kind = if kind == maxBound then minBound else succ kind
+  in conjoin
+      [ fmap id tree === tree
+      , fmap (next . next) tree === fmap next (fmap next tree)
+      , renderElement (fmap fromEnum tree) === renderElement tree
+      , elementTextLength (fmap next tree) === elementTextLength tree
+      , elementKind (fmap next tree) === next (elementKind tree)
+      , counterexample "mapped caches" (validCaches (fmap next tree))
+      , hash (fmap fromEnum tree) === hash (fmap fromEnum (compile model))
+      , hash (cursorRange (rootCursor tree)) === hash (rangeFromLength 0 (byteLength (source model)))
+      ]
 
 propIdentity :: Model -> Property
 propIdentity model = forAll (elements (contexts model)) $ \(path, _, selected, _) ->
@@ -468,6 +485,7 @@ main = do
     , run "independent token boundaries" propChunking
     , run "replacement source, caches and unaffected branches" propReplacement
     , run "identity replacement" propIdentity
+    , run "kind mapping and structural hashing" propKindsAndHashes
     , run "invalid paths" propInvalidPaths
     , run "immediate child replacement" propChildReplacement
     , run "empty, trivia, Unicode and unbounded-length regressions" regressions

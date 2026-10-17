@@ -32,6 +32,8 @@ module Graft.Green.Internal
 import Control.DeepSeq (NFData (..))
 import Control.Monad.ST (ST, runST)
 import Data.Foldable (toList)
+import qualified Data.Foldable as Foldable
+import Data.Hashable (Hashable (..))
 import Data.Primitive.PrimArray
 import Data.Primitive.SmallArray
 import Data.Text (Text)
@@ -49,7 +51,7 @@ import GHC.Exts (isTrue#, reallyUnsafePtrEquality#)
 -- are not checked for overflow, which needs a logical length beyond
 -- @maxBound :: Int@.
 newtype TextLength = TextLength Int
-  deriving newtype (Eq, Ord, Show, Read, Bounded, Enum, Num, Real, Integral, NFData)
+  deriving newtype (Eq, Ord, Show, Read, Bounded, Enum, Num, Real, Integral, NFData, Hashable)
 
 -- | The UTF-8 byte length of a text, in constant time.
 textLengthOf :: Text -> TextLength
@@ -94,6 +96,31 @@ instance NFData kind => NFData (GreenToken kind) where
 instance NFData kind => NFData (GreenElement kind) where
   rnf (Node node) = rnf node
   rnf (Token token) = rnf token
+
+-- | Hashes the kind, the length and every child, so hashing takes time
+-- proportional to the size of the tree; hashes are not cached.
+instance Hashable kind => Hashable (GreenNode kind) where
+  hashWithSalt salt (GreenNode kind len children _) =
+    Foldable.foldl' hashWithSalt (salt `hashWithSalt` kind `hashWithSalt` len) children
+
+instance Hashable kind => Hashable (GreenToken kind) where
+  hashWithSalt salt (GreenToken kind _ text) = salt `hashWithSalt` kind `hashWithSalt` text
+
+instance Hashable kind => Hashable (GreenElement kind) where
+  hashWithSalt salt (Node node) = salt `hashWithSalt` (0 :: Int) `hashWithSalt` node
+  hashWithSalt salt (Token token) = salt `hashWithSalt` (1 :: Int) `hashWithSalt` token
+
+-- | Maps every kind in the tree, reusing the cached lengths and offsets.
+instance Functor GreenNode where
+  fmap f (GreenNode kind len children starts) =
+    GreenNode (f kind) len (mapSmallArray' (fmap f) children) starts
+
+instance Functor GreenToken where
+  fmap f (GreenToken kind len text) = GreenToken (f kind) len text
+
+instance Functor GreenElement where
+  fmap f (Node node) = Node (fmap f node)
+  fmap f (Token token) = Token (fmap f token)
 
 -- | Shows the smart-constructor call that rebuilds the node.
 instance Show kind => Show (GreenNode kind) where
