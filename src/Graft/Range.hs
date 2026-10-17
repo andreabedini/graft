@@ -1,5 +1,13 @@
--- | Validated half-open UTF-8 byte ranges. Offsets share the 'TextLength'
--- unit used by green-tree caches.
+-- | Half-open ranges of UTF-8 byte offsets: a range includes its start and
+-- excludes its end.
+--
+-- >>> let range = rangeFromLength 4 3
+-- >>> (rangeStart range, rangeEnd range)
+-- (4,7)
+-- >>> map (`rangeContains` range) [3, 4, 6, 7]
+-- [False,True,True,False]
+-- >>> textRange 7 4
+-- Nothing
 module Graft.Range
   ( TextRange
   , textRange
@@ -16,8 +24,8 @@ import Control.DeepSeq (NFData (..))
 import Data.Hashable (Hashable (..))
 import Graft.Green (TextLength)
 
--- | A half-open interval with start no greater than end. The constructor is
--- hidden; neither endpoint is required to be a Unicode character boundary.
+-- | A range of byte offsets whose start is no greater than its end. The
+-- endpoints need not fall on character boundaries.
 data TextRange = TextRange !TextLength !TextLength
   deriving (Eq, Ord)
 
@@ -32,14 +40,13 @@ instance NFData TextRange where
 instance Hashable TextRange where
   hashWithSalt salt (TextRange start end) = salt `hashWithSalt` start `hashWithSalt` end
 
--- | Construct a range from start and end, rejecting reversed endpoints.
+-- | The range from a start to an end, or 'Nothing' if the end comes first.
 textRange :: TextLength -> TextLength -> Maybe TextRange
 textRange start end
   | start <= end = Just (TextRange start end)
   | otherwise = Nothing
 
--- | Construct a range from start and byte length. The length must not be
--- negative; cached green lengths never are, and the sum is not checked.
+-- | The range with a start and a length, which must not be negative.
 rangeFromLength :: TextLength -> TextLength -> TextRange
 rangeFromLength start len = TextRange start (start + len)
 
@@ -55,17 +62,17 @@ rangeEnd (TextRange _ end) = end
 rangeLength :: TextRange -> TextLength
 rangeLength (TextRange start end) = end - start
 
--- | Whether both endpoints coincide.
+-- | Whether the range has length zero.
 rangeIsEmpty :: TextRange -> Bool
 rangeIsEmpty range = rangeStart range == rangeEnd range
 
--- | Whether an offset lies in the half-open interval. Empty ranges contain
--- no offsets, and the end offset is excluded.
+-- | Whether an offset lies in the range. The end is excluded, so an empty
+-- range contains no offsets.
 rangeContains :: TextLength -> TextRange -> Bool
 rangeContains offset range = rangeStart range <= offset && offset < rangeEnd range
 
--- | @rangeContainsRange outer inner@ tests endpoint containment. An empty
--- inner range at either endpoint of the outer range is contained.
+-- | @rangeContainsRange outer inner@ is whether @inner@ lies within @outer@,
+-- including an empty @inner@ at either end of @outer@.
 rangeContainsRange :: TextRange -> TextRange -> Bool
 rangeContainsRange outer inner =
   rangeStart outer <= rangeStart inner && rangeEnd inner <= rangeEnd outer

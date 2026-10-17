@@ -1,18 +1,34 @@
 {-# LANGUAGE BangPatterns #-}
 
--- | Immutable syntax without parents or absolute source positions.
+-- | Green trees: immutable nodes and tokens, tagged with your own kind type.
 --
--- Supply every source fragment as token text, including whitespace and comments.
--- Nodes and tokens are abstract so callers cannot invalidate cached lengths.
--- Children must form finite, acyclic trees (shared subtrees are allowed).
+-- Every fragment of the source, whitespace and comments included, is the text
+-- of some token, so rendering a tree gives back the source exactly. Green
+-- values have no parents or positions, so a subtree can appear in several
+-- places and in several versions of a tree. Use a cursor ("Graft.Cursor") to
+-- see where an element is.
+--
+-- >>> :set -XOverloadedStrings
+-- >>> data Kind = Call | Name | Punct | Space deriving (Eq, Show)
+-- >>> let tok kind = Token . greenToken kind
+-- >>> let call = greenNode Call [tok Name "f", tok Punct "(", tok Space " ", tok Punct ")"]
+-- >>> renderNode call
+-- "f( )"
+-- >>> nodeTextLength call
+-- 4
+-- >>> nodeChildAt 1 call
+-- Just (Token (greenToken Punct "("))
 module Graft.Green
-  ( GreenNode
+  ( -- * Trees
+    GreenNode
   , GreenToken
   , GreenElement (..)
-  , TextLength (..)
-  , textLengthOf
   , greenNode
   , greenToken
+    -- * Lengths
+  , TextLength (..)
+  , textLengthOf
+    -- * Inspection
   , nodeKind
   , tokenKind
   , elementKind
@@ -23,6 +39,7 @@ module Graft.Green
   , nodeTextLength
   , tokenTextLength
   , elementTextLength
+    -- * Rendering
   , renderNode
   , renderToken
   , renderElement
@@ -76,10 +93,9 @@ nodeTextLength (GreenNode _ len _ _) = len
 tokenTextLength :: GreenToken kind -> TextLength
 tokenTextLength (GreenToken _ len _) = len
 
--- | Concatenate token text in source order, preserving it exactly. The
--- cached length sizes the result, so the text is copied once into a single
--- allocation. Output must fit in a strict 'Text'; shared subtrees count once
--- per occurrence. Extremely deep trees may exhaust the stack.
+-- | The source text of a node: the text of its tokens, in order. The result
+-- is written into one buffer sized from the cached length. A subtree that
+-- appears in several places is rendered at each of them.
 renderNode :: GreenNode kind -> Text
 renderNode = renderElement . Node
 
@@ -87,7 +103,7 @@ renderNode = renderElement . Node
 renderToken :: GreenToken kind -> Text
 renderToken = tokenText
 
--- | Render either element losslessly. See 'renderNode' for limits.
+-- | The source text of a node or token.
 renderElement :: GreenElement kind -> Text
 renderElement (Token token) = tokenText token
 renderElement element

@@ -1,14 +1,42 @@
 {-# LANGUAGE TypeFamilies #-}
 
--- | Application-defined typed views over immutable syntax occurrences.
--- Views retain concrete text, trivia, paths and ranges through their cursor.
--- Casting is not parsing or grammar validation; missing fields can remain
--- optional even when a node's kind permits a view.
+-- | Typed views of your grammar's nodes and tokens.
+--
+-- A view is a newtype over a cursor with a cast that checks the element's
+-- kind. Accessors written with 'astChild', 'astToken' and friends then give
+-- typed access to fields, and every view keeps its exact text, range and
+-- context, so there is no separate AST to keep in sync with the source.
+--
+-- @
+-- newtype Call = Call (Cursor Kind)
+--
+-- instance AstNode Call where
+--   type AstNodeKind Call = Kind
+--   castNode = matchNode (== CallKind) Call
+--   nodeSyntax (Call cursor) = cursor
+--
+-- newtype Name = Name (Cursor Kind)
+--
+-- instance AstToken Name where
+--   type AstTokenKind Name = Kind
+--   castToken = matchToken (== NameKind) Name
+--   tokenSyntax (Name cursor) = cursor
+--
+-- -- The function being called, if the call has one.
+-- callee :: Call -> Maybe Name
+-- callee = astToken . nodeSyntax
+-- @
+--
+-- A cast checks only the kind, not the grammar, so a call with a missing
+-- callee still casts and @callee@ returns 'Nothing'. Keep the view
+-- constructors private so that views are only made by casting.
 module Graft.Ast
-  ( AstNode (..)
+  ( -- * Views
+    AstNode (..)
   , AstToken (..)
   , matchNode
   , matchToken
+    -- * Fields
   , astChild
   , astChildren
   , astParent
@@ -21,83 +49,77 @@ import Data.Maybe (listToMaybe, mapMaybe)
 import Graft.Cursor
 import Graft.Green
 
--- | A typed node view, usually a newtype around a 'Cursor'. The associated
--- kind type is the application's existing syntax-kind type, with no integer
--- conversion or separate language tag required.
+-- | A typed view of a node, usually a newtype around a 'Cursor'.
 --
--- Instances must reject token cursors. If @castNode cursor = Just view@,
--- @nodeSyntax view@ must retain that exact occurrence in the same snapshot.
--- Casting a view's own syntax must succeed again. Instances must not detach,
--- rebuild, normalize or change the cursor while casting. Hiding application
--- wrapper constructors helps preserve these laws; the type class cannot enforce
--- them. 'matchNode' supplies the usual form-and-kind check without inspecting
--- children, allowing incomplete or malformed nodes to have typed views.
+-- Instances should satisfy these laws, which 'matchNode' does:
+--
+-- * 'castNode' rejects token cursors.
+-- * If @castNode cursor == Just view@, then @nodeSyntax view@ is @cursor@,
+--   unchanged.
+-- * Casting @nodeSyntax view@ succeeds again.
 class AstNode ast where
-  -- | Syntax-kind type used by this node view.
+  -- | The kind type of the trees this view applies to.
   type AstNodeKind ast
-  -- | Try to view a node occurrence. Failure is represented by 'Nothing'.
+  -- | View a node, or 'Nothing' if it isn't one of this view's kinds.
   castNode :: Cursor (AstNodeKind ast) -> Maybe ast
-  -- | The original syntax cursor, retaining all concrete text and context.
+  -- | The cursor the view was made from.
   nodeSyntax :: ast -> Cursor (AstNodeKind ast)
 
--- | A typed token view. Instances obey the same occurrence and round-trip
--- laws as 'AstNode', but must reject node cursors. Empty token text is valid.
--- 'matchToken' checks form and kind; interpreting spelling belongs to callers.
+-- | A typed view of a token, with the same laws as 'AstNode' except that
+-- 'castToken' rejects node cursors. Interpreting the token's text, for
+-- example reading a number, is up to the application.
 class AstToken ast where
-  -- | Syntax-kind type used by this token view.
+  -- | The kind type of the trees this view applies to.
   type AstTokenKind ast
-  -- | Try to view a token occurrence, without changing its text or context.
+  -- | View a token, or 'Nothing' if it isn't one of this view's kinds.
   castToken :: Cursor (AstTokenKind ast) -> Maybe ast
-  -- | The original token cursor, including its snapshot and source range.
+  -- | The cursor the view was made from.
   tokenSyntax :: ast -> Cursor (AstTokenKind ast)
 
--- | @matchNode accepts wrap cursor@ checks node form and the kind predicate,
--- then passes the original cursor to the wrapper. It never traverses children.
--- Typical instance: @castNode = matchNode (== ExpressionKind) Expression@.
--- The wrapper must retain the cursor unchanged to satisfy the 'AstNode' laws.
+-- | @matchNode accepts wrap@ is a 'castNode' that wraps any node whose kind
+-- satisfies @accepts@, as in @castNode = matchNode (== CallKind) Call@. It
+-- doesn't look at the node's children.
 matchNode :: (kind -> Bool) -> (Cursor kind -> ast) -> Cursor kind -> Maybe ast
 matchNode accepts wrap cursor = case cursorGreen cursor of
   Node node | accepts (nodeKind node) -> Just (wrap cursor)
   _ -> Nothing
 
--- | Token counterpart of 'matchNode'. Rejects nodes even if their kind matches.
--- Allows empty or malformed token text; the predicate checks only the kind.
+-- | The 'castToken' counterpart of 'matchNode'. It checks only the kind, not
+-- the text.
 matchToken :: (kind -> Bool) -> (Cursor kind -> ast) -> Cursor kind -> Maybe ast
 matchToken accepts wrap cursor = case cursorGreen cursor of
   Token token | accepts (tokenKind token) -> Just (wrap cursor)
   _ -> Nothing
 
--- | First matching immediate node child in source order, or 'Nothing'. Does
--- not search grandchildren. Stops when the first cast succeeds.
+-- | The first child node that casts to the view, or 'Nothing'. Only direct
+-- children are searched.
 astChild :: AstNode ast => Cursor (AstNodeKind ast) -> Maybe ast
 astChild = listToMaybe . astChildren
 
--- | Matching immediate node children, in source order. Tokens and failed casts
--- are skipped. A token focus returns an empty list. Results are lazy and keep
--- each occurrence's original cursor; repeated green subtrees remain distinct.
+-- | Every child node that casts to the view, in source order. The list is
+-- lazy.
 astChildren :: AstNode ast => Cursor (AstNodeKind ast) -> [ast]
 astChildren = mapMaybe castNode . filter isNode . cursorChildren
 
--- | Cast only the immediate parent to the requested node view. Does not skip
--- a mismatched parent to search higher ancestors. A root returns 'Nothing'.
--- Works from either a node or a token cursor.
+-- | The parent, if it casts to the view. Ancestors further up are not
+-- searched; use 'astAncestors' for that.
 astParent :: AstNode ast => Cursor (AstNodeKind ast) -> Maybe ast
 astParent cursor = cursorParent cursor >>= castNode
 
--- | Matching ancestors, nearest first, excluding the focus. Skips failed casts
--- and retains their original context. Results are lazy; the root returns @[]@.
+-- | Every ancestor that casts to the view, nearest first, not including the
+-- cursor itself. The list is lazy.
 astAncestors :: AstNode ast => Cursor (AstNodeKind ast) -> [ast]
 astAncestors cursor = case cursorParent cursor of
   Nothing -> []
   Just above -> mapMaybe castNode (cursorAncestors above)
 
--- | First matching immediate token child, including empty tokens. Does not
--- search inside child nodes. Stops when the first cast succeeds.
+-- | The first child token that casts to the view, or 'Nothing'. Tokens inside
+-- child nodes are not searched.
 astToken :: AstToken ast => Cursor (AstTokenKind ast) -> Maybe ast
 astToken = listToMaybe . astTokens
 
--- | Matching immediate token children in source order, skipping nodes and
--- failed casts. A token focus returns @[]@ rather than itself. Results are lazy.
+-- | Every child token that casts to the view, in source order. The list is
+-- lazy.
 astTokens :: AstToken ast => Cursor (AstTokenKind ast) -> [ast]
 astTokens = mapMaybe castToken . filter (not . isNode) . cursorChildren
 

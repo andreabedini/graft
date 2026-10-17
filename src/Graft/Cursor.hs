@@ -81,10 +81,10 @@ data Context kind
   = Top
   | Crumb !(GreenNode kind) !TextLength !Bool !(Context kind) !Int
 
--- | A focus and its context. A node and a token use the same cursor type;
--- distinguish them by inspecting 'cursorGreen'. Equality of occurrences is
--- intentionally not supplied: compare paths within a known snapshot instead.
---
+-- | A position in a tree: a focused node or token and the path back to the
+-- root. Nodes and tokens share the cursor type; match on 'cursorGreen' to
+-- tell them apart. There is no 'Eq' instance, because two equal subtrees in
+-- different places are different occurrences; compare 'cursorPath's instead.
 -- The flag records that the focus has been replaced since the parent was
 -- last rebuilt; the parent is rebuilt lazily on the way up or sideways.
 data Cursor kind = Cursor !(GreenElement kind) !TextLength !Bool !(Context kind)
@@ -101,7 +101,7 @@ instance Show kind => Show (Cursor kind) where
     showString "Cursor " . shows (cursorPath cursor) . showChar ' '
       . shows (cursorRange cursor) . showChar ' ' . shows (cursorGreen cursor)
 
--- | Focus a green root at byte offset zero. A token root is allowed.
+-- | A cursor on the root of a tree, at offset zero. The root may be a token.
 rootCursor :: GreenElement kind -> Cursor kind
 rootCursor green = Cursor green 0 False Top
 
@@ -109,28 +109,27 @@ rootCursor green = Cursor green 0 False Top
 cursorGreen :: Cursor kind -> GreenElement kind
 cursorGreen (Cursor green _ _ _) = green
 
--- | The caller-defined kind of the focused element.
+-- | The kind of the focused element.
 cursorKind :: Cursor kind -> kind
 cursorKind = elementKind . cursorGreen
 
--- | Absolute half-open byte range, including all token text and trivia.
+-- | The byte range of the focus in the whole tree.
 cursorRange :: Cursor kind -> TextRange
 cursorRange (Cursor green offset _ _) = rangeFromLength offset (elementTextLength green)
 
--- | Exact source text of the focus, as 'renderElement'.
+-- | The source text of the focus.
 cursorText :: Cursor kind -> Text
 cursorText = renderElement . cursorGreen
 
--- | Child path from the snapshot's root to this occurrence. Takes time
--- proportional to depth; counts both nodes and tokens.
+-- | The path from the root to the focus. Takes time proportional to depth.
 cursorPath :: Cursor kind -> Path
 cursorPath (Cursor _ _ _ context) = go context []
   where
     go Top path = path
     go (Crumb _ _ _ above index) path = go above (index : path)
 
--- | The immediate parent, or 'Nothing' at the root. Constant time unless
--- the focus was replaced, in which case the parent's child array is copied.
+-- | The parent, or 'Nothing' at the root. Constant time, unless the focus was
+-- replaced, in which case the parent is rebuilt by copying its child array.
 cursorParent :: Cursor kind -> Maybe (Cursor kind)
 cursorParent (Cursor _ _ _ Top) = Nothing
 cursorParent (Cursor focus _ edited (Crumb parent start parentEdited above index)) =
@@ -142,7 +141,7 @@ rebuilt edited index focus parent
   | edited = setChild index focus parent
   | otherwise = parent
 
--- | Ascend to the snapshot's root, rebuilding only ancestors of replaced foci.
+-- | A cursor on the root, rebuilding any ancestors of replaced foci.
 cursorRoot :: Cursor kind -> Cursor kind
 cursorRoot cursor@(Cursor _ _ _ Top) = cursor
 cursorRoot (Cursor focus _ edited (Crumb parent start parentEdited above index)) =
@@ -153,14 +152,12 @@ cursorRoot (Cursor focus _ edited (Crumb parent start parentEdited above index))
       climb (rebuilt nodeEdited position (Node node) grandparent) offset
         (nodeEdited || grandparentEdited) context
 
--- | Follow a path relative to the current focus. Validation matches
--- 'Graft.Edit.elementAt', including negative-index precedence.
+-- | Follow a path down from the focus, failing as 'Graft.Edit.elementAt' does.
 cursorAt :: Path -> Cursor kind -> Either PathError (Cursor kind)
 cursorAt [] cursor = Right cursor
 cursorAt (index : rest) cursor = cursorChildAt index cursor >>= cursorAt rest
 
--- | Focus a zero-based immediate child in constant time, using the parent's
--- cached child offsets.
+-- | The child at a zero-based position, in constant time.
 cursorChildAt :: Int -> Cursor kind -> Either PathError (Cursor kind)
 cursorChildAt index (Cursor green offset edited context)
   | index < 0 = Left (NegativeChildIndex index)
@@ -175,22 +172,22 @@ childCursor node offset edited context index =
   Cursor (childAt node index) (offset + childStart node index) False
     (Crumb node offset edited context index)
 
--- | First immediate child, including tokens and zero-length elements.
+-- | The first child, or 'Nothing' if there are none.
 cursorFirstChild :: Cursor kind -> Maybe (Cursor kind)
 cursorFirstChild = either (const Nothing) Just . cursorChildAt 0
 
--- | Last immediate child, in constant time.
+-- | The last child, or 'Nothing' if there are none.
 cursorLastChild :: Cursor kind -> Maybe (Cursor kind)
 cursorLastChild cursor = case cursorGreen cursor of
   Node node -> either (const Nothing) Just (cursorChildAt (childCount node - 1) cursor)
   Token _ -> Nothing
 
--- | Following sibling, including empty elements. Constant time unless the
--- focus was replaced, in which case the parent is rebuilt first.
+-- | The next sibling. Constant time, unless the focus was replaced, in which
+-- case the parent is rebuilt first.
 cursorNextSibling :: Cursor kind -> Maybe (Cursor kind)
 cursorNextSibling = siblingAt 1
 
--- | Preceding sibling, including empty elements. Costs as 'cursorNextSibling'.
+-- | The previous sibling, at the same cost as 'cursorNextSibling'.
 cursorPreviousSibling :: Cursor kind -> Maybe (Cursor kind)
 cursorPreviousSibling = siblingAt (-1)
 
@@ -202,19 +199,18 @@ siblingAt step (Cursor focus _ edited (Crumb parent start parentEdited above ind
   where
     target = index + step
 
--- | Immediate children in source order. A token has no children.
+-- | The children, in source order. A token has none.
 cursorChildren :: Cursor kind -> [Cursor kind]
 cursorChildren (Cursor green offset edited context) = case green of
   Token _ -> []
   Node node -> map (childCursor node offset edited context) [0 .. childCount node - 1]
 
--- | The focus followed by its parents, nearest first.
+-- | The focus and then each ancestor, up to the root.
 cursorAncestors :: Cursor kind -> [Cursor kind]
 cursorAncestors = unfold cursorParent . Just
 
--- | Preorder traversal including the focus, every node, and every token.
--- Shared green values are visited once per occurrence. Results are lazy, and
--- the traversal takes time proportional to the number of occurrences.
+-- | The focus and everything below it, in preorder. A subtree that appears
+-- in several places is visited at each of them. The list is lazy.
 cursorDescendants :: Cursor kind -> [Cursor kind]
 cursorDescendants cursor = go cursor []
   where
@@ -228,17 +224,15 @@ instance NFData a => NFData (WalkEvent a) where
   rnf (Enter value) = rnf value
   rnf (Leave value) = rnf value
 
--- | Preorder traversal that also reports when each occurrence is left, as a
--- formatter or pretty-printer needs to close what it opened. Every node and
--- token is entered, then its children are walked, then it is left. Results
--- are lazy and take time proportional to the number of occurrences.
+-- | A preorder traversal that also reports leaving each element, as a
+-- formatter needs in order to close what it opened. Each element is entered,
+-- its children are walked, and then it is left. The list is lazy.
 cursorWalk :: Cursor kind -> [WalkEvent (Cursor kind)]
 cursorWalk cursor = go cursor []
   where
     go current rest = Enter current : foldr go (Leave current : rest) (cursorChildren current)
 
--- | All token occurrences in this subtree in source order, including empty
--- tokens and trivia. Does not include tokens outside the focus.
+-- | Every token at or below the focus, in source order.
 cursorTokens :: Cursor kind -> [Cursor kind]
 cursorTokens = filter isToken . cursorDescendants
   where
@@ -246,34 +240,33 @@ cursorTokens = filter isToken . cursorDescendants
       Token _ -> True
       Node _ -> False
 
--- | First token in this subtree, skipping tokenless nodes. A token focus
--- returns itself, even when its text is empty.
+-- | The first token at or below the focus. A token is its own first token.
 cursorFirstToken :: Cursor kind -> Maybe (Cursor kind)
 cursorFirstToken cursor = case cursorGreen cursor of
   Token _ -> Just cursor
   Node _ -> cursorFirstChild cursor >>= seek cursorFirstToken cursorNextSibling
 
--- | Last token in this subtree, skipping tokenless nodes.
+-- | The last token at or below the focus.
 cursorLastToken :: Cursor kind -> Maybe (Cursor kind)
 cursorLastToken cursor = case cursorGreen cursor of
   Token _ -> Just cursor
   Node _ -> cursorLastChild cursor >>= seek cursorLastToken cursorPreviousSibling
 
--- | First token after the entire focused subtree in the snapshot, ascending
--- as needed. Includes empty tokens; from a token, moves to the next token.
+-- | The first token after the focus and everything below it, anywhere in the
+-- tree.
 cursorNextToken :: Cursor kind -> Maybe (Cursor kind)
 cursorNextToken cursor =
   (cursorNextSibling cursor >>= seek cursorFirstToken cursorNextSibling)
     <|> (cursorParent cursor >>= cursorNextToken)
 
--- | Last token before the entire focused subtree in the snapshot.
+-- | The last token before the focus, anywhere in the tree.
 cursorPreviousToken :: Cursor kind -> Maybe (Cursor kind)
 cursorPreviousToken cursor =
   (cursorPreviousSibling cursor >>= seek cursorLastToken cursorPreviousSibling)
     <|> (cursorParent cursor >>= cursorPreviousToken)
 
--- | Offset lookup is unambiguous inside a token and may select both tokens
--- at a shared boundary. The pair is ordered left to right.
+-- | The tokens at an offset: none, one, or the two on either side of a
+-- boundary, left first.
 data TokenAtOffset a = NoToken | SingleToken a | BetweenTokens a a
   deriving (Eq, Show, Functor, Foldable, Traversable)
 
@@ -282,12 +275,11 @@ instance NFData a => NFData (TokenAtOffset a) where
   rnf (SingleToken token) = rnf token
   rnf (BetweenTokens left right) = rnf left `seq` rnf right
 
--- | Find nonempty tokens touching an absolute byte offset within this focus.
--- Uses closed endpoint contact despite the half-open ranges: start and EOF
--- select the first and last nonempty token; a shared boundary selects both.
--- Empty tokens are ignored. An offset outside the focus returns 'NoToken'.
--- Offsets inside multibyte characters are accepted. Each level binary-searches
--- the cached child offsets, and the search stops after two tokens.
+-- | The tokens below the focus that touch an offset. An offset inside a token
+-- gives that token; an offset between two tokens gives both, as an editor's
+-- caret between two words touches both. The start and end of the text give
+-- the first and last token. Empty tokens are skipped, and an offset outside
+-- the focus gives 'NoToken'. Each level is binary-searched.
 tokenAtOffset :: TextLength -> Cursor kind -> TokenAtOffset (Cursor kind)
 tokenAtOffset offset cursor = case take 2 (matching cursor) of
   [] -> NoToken
@@ -307,11 +299,10 @@ tokenAtOffset offset cursor = case take 2 (matching cursor) of
       where
         range = cursorRange current
 
--- | Descend repeatedly into the first child whose range contains the query.
--- Returns the innermost element along that branch, or 'Nothing' if the query
--- lies outside the focus. At ambiguous empty ranges (including EOF), ties
--- favor the first covering child in source order, including empty elements.
--- Each level binary-searches the cached child offsets.
+-- | The innermost element below the focus whose range contains the given
+-- range, or 'Nothing' if the range lies outside the focus. When several
+-- children contain it, as they can for an empty range on a boundary, the
+-- leftmost is chosen. Each level is binary-searched.
 coveringElement :: TextRange -> Cursor kind -> Maybe (Cursor kind)
 coveringElement query cursor
   | not (rangeContainsRange (cursorRange cursor) query) = Nothing
@@ -325,45 +316,37 @@ coveringElement query cursor
           index = firstChildEndingAtOrAfter node (rangeEnd query - start)
       _ -> current
 
--- | Replace the focused element, keeping the cursor at the same path and
--- start offset. The result navigates the edited snapshot: ancestors are
--- rebuilt lazily when you move up or sideways, so a run of edits in one
--- region pays for each ancestor once. The original cursor and its snapshot
--- stay unchanged. Replacement may change kind or switch node/token form,
--- including at the root. Use 'cursorTree' to obtain the edited tree.
+-- | Replace the focus, returning a cursor at the same path in the edited
+-- tree. The replacement can be of any kind, node or token. Ancestors are
+-- rebuilt only when the cursor moves up or sideways, so a run of edits in one
+-- region rebuilds each ancestor once. The original cursor still sees the
+-- original tree. 'cursorTree' gives the edited tree.
 replaceFocus :: GreenElement kind -> Cursor kind -> Cursor kind
 replaceFocus replacement (Cursor _ offset _ context) = Cursor replacement offset True context
 
--- | Apply a function to the focused element, as 'replaceFocus'.
+-- | Replace the focus with a function of it, as 'replaceFocus'.
 modifyFocus :: (GreenElement kind -> GreenElement kind) -> Cursor kind -> Cursor kind
 modifyFocus edit cursor = replaceFocus (edit (cursorGreen cursor)) cursor
 
--- | The whole tree that this cursor navigates, including every edit made
--- through it. Rebuilds the ancestors of replaced foci, sharing everything else.
+-- | The whole tree the cursor is in, including every edit made through it.
 cursorTree :: Cursor kind -> GreenElement kind
 cursorTree = cursorGreen . cursorRoot
 
--- | Splice immediate children of a focused node, keeping the focus on that
--- node. Bounds and sharing follow 'Edit.spliceChildren'. A token focus returns
--- 'CannotEditTokenChildren' before checking boundaries. The original cursor
--- retains its snapshot; the result observes shifted paths and byte ranges.
--- No punctuation, whitespace or comments are inserted implicitly.
+-- | 'Graft.Edit.spliceChildren' on the focused node, returning a cursor on
+-- the edited node. A token focus gives 'CannotEditTokenChildren'.
 spliceChildrenFocus
   :: Int -> Int -> [GreenElement kind] -> Cursor kind
   -> Either ChildEditError (Cursor kind)
 spliceChildrenFocus start end replacements =
   editChildrenFocus (Edit.spliceChildren start end replacements)
 
--- | Insert one child into a focused node. Its child count appends. Validation
--- and focus follow 'spliceChildrenFocus'.
+-- | 'Graft.Edit.insertChild' on the focused node, as 'spliceChildrenFocus'.
 insertChildFocus
   :: Int -> GreenElement kind -> Cursor kind
   -> Either ChildEditError (Cursor kind)
 insertChildFocus index element = editChildrenFocus (Edit.insertChild index element)
 
--- | Remove an existing child of a focused node. Removing the last child
--- leaves an empty node. Follows 'spliceChildrenFocus'; the child count is out
--- of bounds for removal.
+-- | 'Graft.Edit.removeChild' on the focused node, as 'spliceChildrenFocus'.
 removeChildFocus :: Int -> Cursor kind -> Either ChildEditError (Cursor kind)
 removeChildFocus index = editChildrenFocus (Edit.removeChild index)
 

@@ -4,6 +4,16 @@
 --
 -- To make several edits in one region, or to edit what you found by
 -- navigating, edit through a cursor instead ("Graft.Cursor").
+--
+-- >>> :set -XOverloadedStrings
+-- >>> let tok = Token . greenToken 't'
+-- >>> let tree = Node (greenNode 'l' [tok "a", tok ", ", tok "b"])
+-- >>> renderElement <$> replaceAt [2] (tok "c") tree
+-- Right "a, c"
+-- >>> renderElement <$> spliceChildrenAt [] 3 3 [tok ", ", tok "d"] tree
+-- Right "a, b, d"
+-- >>> replaceAt [5] (tok "c") tree
+-- Left (ChildIndexOutOfBounds 5)
 module Graft.Edit
   ( -- * Paths
     Path
@@ -26,14 +36,14 @@ import Control.Exception (Exception)
 import Graft.Green
 import Graft.Green.Internal (childAt, childCount, setChild, spliceChildrenUnchecked)
 
--- | Zero-based child indices, counting both nodes and tokens. The empty path
--- denotes the root. Paths belong to a particular tree version; an edit may
--- invalidate paths inside the replaced subtree. Child insertion/removal also
--- shifts paths of following siblings and their descendants.
+-- | The zero-based index of a child at each level, from the root down. Every
+-- child counts, tokens included, and @[]@ is the root itself. A path belongs
+-- to one version of a tree: inserting or removing children shifts the paths
+-- that follow.
 type Path = [Int]
 
--- | Failure at the first invalid step in a path. Indices are relative to
--- the node reached at that step. No partial result is returned.
+-- | Why a path doesn't lead to an element, reported for the first step that
+-- fails. The index is the one at that step.
 data PathError
   = NegativeChildIndex Int
   | ChildIndexOutOfBounds Int
@@ -47,7 +57,7 @@ instance NFData PathError where
   rnf (ChildIndexOutOfBounds _) = ()
   rnf CannotDescendIntoToken = ()
 
--- | Look up a subtree or token. Takes time proportional to path depth.
+-- | The element at a path. Takes time proportional to the path's length.
 elementAt :: Path -> GreenElement kind -> Either PathError (GreenElement kind)
 elementAt [] root = Right root
 elementAt (index : rest) root
@@ -58,15 +68,13 @@ elementAt (index : rest) root
         | index >= childCount node -> Left (ChildIndexOutOfBounds index)
         | otherwise -> elementAt rest (childAt node index)
 
--- | @replaceAt path replacement root@ replaces the selected element.
--- An empty path replaces the whole root. Replacement may change kind or switch
--- between node and token; grammar validation is the caller's responsibility.
+-- | @replaceAt path replacement root@ replaces the element at @path@, which
+-- may be @[]@ to replace the whole tree. The replacement can be of any kind,
+-- node or token; Graft doesn't check it against a grammar.
 --
--- Only ancestor nodes on the path are rebuilt, each by copying its child
--- array; sibling elements are reused and the original root remains usable.
--- Ancestor lengths are adjusted by the change in the replaced child's length.
--- Cost is proportional to the sum of ancestor child counts; replacement text
--- and untouched descendants are not traversed.
+-- Each ancestor on the path is rebuilt by copying its child array, so the
+-- cost is the total width of the ancestors. Everything else is shared with
+-- the original tree, which remains valid.
 replaceAt :: Path -> GreenElement kind -> GreenElement kind -> Either PathError (GreenElement kind)
 replaceAt [] replacement _ = Right replacement
 replaceAt (index : rest) replacement root
@@ -75,15 +83,14 @@ replaceAt (index : rest) replacement root
       Token _ -> Left CannotDescendIntoToken
       Node node -> Node <$> modifyChild index (replaceAt rest replacement) node
 
--- | Replace one immediate child, preserving the root node and its kind.
--- Uses the same validation and sharing rules as 'replaceAt'.
+-- | Replace one child of a node, as 'replaceAt' with a one-step path.
 replaceChild :: Int -> GreenElement kind -> GreenNode kind -> Either PathError (GreenNode kind)
 replaceChild index replacement = modifyChild index (const (Right replacement))
 
--- | Invalid child editing. Path failures retain the original 'PathError'.
--- 'CannotEditTokenChildren' means that the selected target is a token.
--- Boundary errors carry the offending position; a reversed range carries
--- start and end. Positions count nodes and tokens, including empty elements.
+-- | Why a child edit failed. 'ChildEditPathError' wraps a path that leads
+-- nowhere, 'CannotEditTokenChildren' means the target is a token, and the
+-- others report a bad child position (or both positions of a reversed
+-- range).
 data ChildEditError
   = ChildEditPathError PathError
   | CannotEditTokenChildren
@@ -98,17 +105,15 @@ instance NFData ChildEditError where
   rnf (ChildEditPathError err) = rnf err
   rnf _ = ()
 
--- | @spliceChildren start end replacements node@ replaces the half-open child
--- range @[start,end)@. Both boundaries must lie between zero and the child
--- count, inclusive. Equal boundaries insert; an empty replacement deletes.
--- The node's kind is retained. No text, separators or trivia are synthesized.
+-- | @spliceChildren start end replacements node@ replaces the children at
+-- positions @start@ up to but not including @end@. With @start == end@ it
+-- inserts; with no replacements it deletes. Positions run from 0 to the
+-- number of children. Nothing is added for you: include any separators or
+-- whitespace in the replacements.
 --
--- Validation checks negative start, negative end, reversed range, start bounds,
--- then end bounds, in that order. Invalid input returns no partial result.
--- Untouched children are reused. Cost is proportional to the number of
--- children plus replacements: the child array is copied and the offsets of
--- following children are shifted. Descendant text is not traversed. The
--- replacement list must be finite.
+-- Errors are checked in this order: a negative start or end, then
+-- @end < start@, then a start or end past the last child. Cost is
+-- proportional to the number of children plus replacements.
 spliceChildren
   :: Int -> Int -> [GreenElement kind] -> GreenNode kind
   -> Either ChildEditError (GreenNode kind)
@@ -120,45 +125,36 @@ spliceChildren start end replacements node
   | end > childCount node = Left (ChildBoundaryOutOfBounds end)
   | otherwise = Right (spliceChildrenUnchecked start end replacements node)
 
--- | Insert one immediate child before the given index. The child count is a
--- valid position and appends; zero inserts into an empty node. Uses the same
--- validation, sharing and cache rules as 'spliceChildren'.
+-- | Insert a child before the given position; the number of children
+-- appends. As @spliceChildren index index [element]@.
 insertChild
   :: Int -> GreenElement kind -> GreenNode kind
   -> Either ChildEditError (GreenNode kind)
 insertChild index element = spliceChildren index index [element]
 
--- | Remove one existing immediate child. Unlike insertion, the child count
--- is out of bounds. Negative indices return 'NegativeChildBoundary'; a missing
--- child returns 'ChildBoundaryOutOfBounds'. Retains the node's kind
--- and follows the same sharing and cache rules as 'spliceChildren'.
+-- | Remove the child at a position. Removing the last child leaves an empty
+-- node of the same kind.
 removeChild :: Int -> GreenNode kind -> Either ChildEditError (GreenNode kind)
 removeChild index node
   | index < 0 = Left (NegativeChildBoundary index)
   | index >= childCount node = Left (ChildBoundaryOutOfBounds index)
   | otherwise = Right (spliceChildrenUnchecked index (index + 1) [] node)
 
--- | Splice the children of the node selected by a root-relative path and
--- return a new root. An empty path selects the root node. Path validation
--- precedes target validation (a token has no editable children), which precedes
--- boundary validation. A successful edit rebuilds the ancestors on the path.
--- Paths and byte offsets after the edited range can change in the new snapshot.
+-- | 'spliceChildren' on the node at a path, returning the new tree. A bad
+-- path is reported first, then a token target, then bad positions.
 spliceChildrenAt
   :: Path -> Int -> Int -> [GreenElement kind] -> GreenElement kind
   -> Either ChildEditError (GreenElement kind)
 spliceChildrenAt path start end replacements =
   editNodeAt path (spliceChildren start end replacements)
 
--- | Insert a child into the path-selected node. The index is relative to that
--- node; its child count appends. Validation and persistence match 'spliceChildrenAt'.
+-- | 'insertChild' on the node at a path, returning the new tree.
 insertChildAt
   :: Path -> Int -> GreenElement kind -> GreenElement kind
   -> Either ChildEditError (GreenElement kind)
 insertChildAt path index element = editNodeAt path (insertChild index element)
 
--- | Remove an existing child of the path-selected node. Validation and
--- persistence match 'spliceChildrenAt'; the node itself is retained, even
--- after removing its last child.
+-- | 'removeChild' on the node at a path, returning the new tree.
 removeChildAt
   :: Path -> Int -> GreenElement kind -> Either ChildEditError (GreenElement kind)
 removeChildAt path index = editNodeAt path (removeChild index)

@@ -57,24 +57,22 @@ newtype TextLength = TextLength Int
 textLengthOf :: Text -> TextLength
 textLengthOf = TextLength . Text.lengthWord8
 
--- | An interior node with a kind, children in source order, and cached
--- lengths. Construct one with 'greenNode'; its representation stores the
--- total length, the children in an array, and the start of each child
--- relative to the node, so child access and offset lookup take constant time.
+-- | An interior node: a kind and its children in source order. Construct one
+-- with 'greenNode'. A node caches its total length and the offset of each
+-- child, so reading a length or a child takes constant time.
 data GreenNode kind = GreenNode
   !kind
   !TextLength
   !(SmallArray (GreenElement kind))
   !(PrimArray Int)
 
--- | A leaf with a kind and exact Unicode text, which may be empty, together
--- with its cached UTF-8 byte length. Construct one with 'greenToken'. No
--- normalization is performed.
+-- | A leaf: a kind and the exact text of a source fragment, which may be
+-- empty. Construct one with 'greenToken'. Text is stored as given, with no
+-- normalization.
 data GreenToken kind = GreenToken !kind !TextLength {-# UNPACK #-} !Text
   deriving (Eq)
 
--- | A node or token. Both can occur as children of a node.
---
+-- | A node or a token; either can be a child of a node.
 -- Tokens are unpacked into the element, which saves a box per token (about
 -- 15% of a typical tree's heap). Nodes stay boxed so that cursors can share
 -- the parent node instead of re-allocating it on every descent.
@@ -136,10 +134,9 @@ instance Show kind => Show (GreenToken kind) where
   showsPrec precedence (GreenToken kind _ text) = showParen (precedence > 10) $
     showString "greenToken " . showsPrec 11 kind . showChar ' ' . showsPrec 11 text
 
--- | Construct a node from children in source order. Takes time proportional
--- to the number of children, reading their cached lengths without rendering
--- them; the child values are reused, not copied. An empty list is allowed.
--- The list must be finite.
+-- | A node with a kind and its children in source order, which may be none.
+-- Takes time proportional to the number of children; the children are
+-- shared, not copied or traversed.
 greenNode :: kind -> [GreenElement kind] -> GreenNode kind
 greenNode kind children = runST $ do
   let count = length children

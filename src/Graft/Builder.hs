@@ -59,9 +59,11 @@ import Data.Text (Text)
 import Graft.Green
 import Graft.Green.Internal (greenNodeReversed)
 
--- | A pending forest in reverse source order, its cached element count, and
--- a stack of open node kinds and starting positions. Constructors are hidden.
--- Keeping old builder values permits independent branches without mutation.
+-- | A tree under construction: the elements emitted so far and the nodes
+-- still open. A builder is an ordinary immutable value, so keeping an old one
+-- lets you continue from it along a different branch.
+-- Pending elements are in reverse order, with their count, and each open node
+-- records the position where it started.
 data Builder kind = Builder !Int [GreenElement kind] [(kind, Int)]
   deriving (Eq)
 
@@ -85,11 +87,10 @@ instance Show kind => Show (Builder kind) where
 instance NFData kind => NFData (Builder kind) where
   rnf (Builder _ pending parents) = rnf pending `seq` rnf parents
 
--- | A position in the pending forest, counting nodes and tokens, not bytes.
--- Like Rowan's checkpoint, this is a positional marker, not an owned handle:
--- it records neither builder provenance nor historical validity. Use it with
--- the corresponding construction history. Closing nodes collapses positions;
--- later emission can make an old position numerically valid again.
+-- | A position among the elements emitted so far, counted in elements, from
+-- which 'startNodeAt' can open a node. As in Rowan, it is only a number: it
+-- doesn't remember which builder it came from. Use it in the node where it
+-- was taken, before that node closes.
 --
 -- 'Show' displays the position, as @Checkpoint 3@; there is no expression
 -- that builds a checkpoint without a builder.
@@ -99,9 +100,8 @@ newtype Checkpoint = Checkpoint Int
 instance NFData Checkpoint where
   rnf (Checkpoint _) = ()
 
--- | Construction failures. Failed operations leave the supplied builder
--- available unchanged. Checkpoint error fields are marker position followed
--- by current pending count or the current node's starting position.
+-- | Why construction failed. The checkpoint errors give the checkpoint's
+-- position, then the number of elements or the start of the current node.
 data BuilderError
   = NoOpenNode
   | UnclosedNodes Int
@@ -117,50 +117,41 @@ instance Exception BuilderError
 instance NFData BuilderError where
   rnf err = err `seq` ()
 
--- | Empty builder with no open nodes or emitted elements.
+-- | A builder with nothing emitted and no open nodes.
 emptyBuilder :: Builder kind
 emptyBuilder = Builder 0 [] []
 
--- | Open a node at the current end of the pending forest. Constant time.
--- The node must subsequently be closed by 'finishNode'.
+-- | Open a node, which 'finishNode' closes.
 startNode :: kind -> Builder kind -> Builder kind
 startNode kind (Builder count pending parents) =
   Builder count pending ((kind, count) : parents)
 
--- | Emit exact token text, including empty text or trivia. May also be used
--- before opening a root for later wrapping by 'startNodeAt'. Token construction
--- has the cost of 'greenToken'; adding it to the builder takes constant time.
+-- | Emit a token. Constant time.
 emitToken :: kind -> Text -> Builder kind -> Builder kind
 emitToken kind text = emitElement (Token (greenToken kind text))
 
--- | Append an existing green element in constant time, reusing its value and
--- cached length without rendering or traversing descendants. This can seed
--- syntax-preserving construction with untouched subtrees.
+-- | Emit an existing node or token, such as an unchanged subtree from an
+-- earlier tree. Constant time; the element is shared, not copied.
 emitElement :: GreenElement kind -> Builder kind -> Builder kind
 emitElement !element (Builder count pending parents) =
   Builder (count + 1) (element : pending) parents
 
--- | Close the innermost open node. All pending elements from its starting
--- position become its children in source order; their slot is replaced with
--- one completed node. Empty nodes are allowed. Costs a traversal of the
--- immediate children, with no traversal of their descendants.
+-- | Close the innermost open node, making everything emitted since it opened
+-- into its children. Takes time proportional to the number of children.
 finishNode :: Builder kind -> Either BuilderError (Builder kind)
 finishNode (Builder _ _ []) = Left NoOpenNode
 finishNode (Builder count pending ((kind, start) : parents)) =
   case greenNodeReversed kind (count - start) pending of
     (!node, before) -> Right (Builder (start + 1) (Node node : before) parents)
 
--- | Mark the end of the pending forest in constant time. The marker can be
--- retained while emitting tokens or completed nodes, then used for wrapping.
+-- | The current position, for a later 'startNodeAt'.
 checkpoint :: Builder kind -> Checkpoint
 checkpoint (Builder count _ _) = Checkpoint count
 
--- | @startNodeAt marker kind builder@ opens a node at an earlier pending
--- position, including all emitted elements since the marker and any elements
--- emitted before it is closed. The marker may equal the current end (an empty
--- initial suffix), but cannot lie past it or before the current open node.
--- A top-level suffix can be wrapped when no node is open. Constant time;
--- actual assembly is deferred to 'finishNode'. Bounds are positional only.
+-- | @startNodeAt marker kind@ opens a node that starts at an earlier
+-- checkpoint, so the elements emitted since then become its first children.
+-- This is how a parser wraps an operand it has already emitted once it sees
+-- the operator. The checkpoint must lie within the current open node.
 startNodeAt :: Checkpoint -> kind -> Builder kind -> Either BuilderError (Builder kind)
 startNodeAt (Checkpoint position) kind (Builder count pending parents)
   | position > count = Left (CheckpointOutOfBounds position count)
@@ -168,10 +159,8 @@ startNodeAt (Checkpoint position) kind (Builder count pending parents)
       Left (CheckpointBeforeCurrentNode position start)
   | otherwise = Right (Builder count pending ((kind, position) : parents))
 
--- | Validate balanced construction and return the single completed root node.
--- Fails for unclosed nodes (checked first), an empty forest, multiple roots,
--- or a lone token. This does not implicitly close nodes or mutate the builder.
--- Checking balance takes time proportional to the number of open nodes.
+-- | The finished tree. Fails if a node is still open (checked first), or
+-- unless exactly one node was emitted at the top level.
 runBuilder :: Builder kind -> Either BuilderError (GreenNode kind)
 runBuilder (Builder count pending parents) = case parents of
   _ : _ -> Left (UnclosedNodes (length parents))

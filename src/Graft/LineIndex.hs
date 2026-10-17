@@ -11,6 +11,15 @@
 -- Protocol. Lines and columns are zero-based. A line's terminator belongs to
 -- that line, so an offset just after a @\\r@ that precedes @\\n@ still lies
 -- on the @\\r@'s line.
+--
+-- >>> :set -XOverloadedStrings
+-- >>> let index = lineIndex "let x =\r\n  \"\x1F600\" in x\n"
+-- >>> utf8Position 16 index
+-- Just (Position {positionLine = 1, positionColumn = 7})
+-- >>> utf16Position 16 index
+-- Just (Position {positionLine = 1, positionColumn = 5})
+-- >>> fromUtf16Position (Position 1 5) index
+-- Just 16
 module Graft.LineIndex
   ( LineIndex
   , lineIndex
