@@ -22,8 +22,8 @@ any number of times.
 Green values have no parents and no absolute positions, so a subtree can be
 shared between trees and between versions of one tree. Their constructors are
 hidden, and the smart constructors `greenNode` and `greenToken` establish the
-cached lengths. `Graft.Green.Internal` exposes the representation for code that
-needs it, outside the package's versioning policy.
+cached lengths. The representation lives in `Graft.Green.Internal`, which the
+package does not expose.
 
 All lengths and offsets are `TextLength`, a newtype over `Int` counting UTF-8
 bytes. `Text` is stored as UTF-8, so a token's byte length is read in constant

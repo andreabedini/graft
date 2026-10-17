@@ -3,8 +3,7 @@
 -- | Immutable syntax without parents or absolute source positions.
 --
 -- Supply every source fragment as token text, including whitespace and comments.
--- Nodes and tokens are abstract so callers cannot invalidate cached lengths;
--- "Graft.Green.Internal" exposes the representation for code that needs it.
+-- Nodes and tokens are abstract so callers cannot invalidate cached lengths.
 -- Children must form finite, acyclic trees (shared subtrees are allowed).
 module Graft.Green
   ( GreenNode

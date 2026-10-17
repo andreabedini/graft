@@ -3,10 +3,10 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MagicHash #-}
 
--- | Representation of green trees, for code that needs to work below the
--- public API. Nothing here is covered by the package's versioning policy, and
--- constructing values directly can break the cached lengths and offsets that
--- the rest of the library relies on. Prefer "Graft.Green".
+-- | Representation of green trees, shared by the library's modules and not
+-- exposed by the package. Constructing values directly can break the cached
+-- lengths and offsets that the rest of the library relies on; "Graft.Green"
+-- re-exports the safe interface.
 module Graft.Green.Internal
   ( -- * Representation
     TextLength (..)
