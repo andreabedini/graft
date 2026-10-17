@@ -18,7 +18,12 @@ import Graft.Green (TextLength)
 -- | A half-open interval with start no greater than end. The constructor is
 -- hidden; neither endpoint is required to be a Unicode character boundary.
 data TextRange = TextRange !TextLength !TextLength
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord)
+
+-- | Shows the 'rangeFromLength' call that rebuilds the range.
+instance Show TextRange where
+  showsPrec precedence (TextRange start end) = showParen (precedence > 10) $
+    showString "rangeFromLength " . showsPrec 11 start . showChar ' ' . showsPrec 11 (end - start)
 
 instance NFData TextRange where
   rnf (TextRange _ _) = ()

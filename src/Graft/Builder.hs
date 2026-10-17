@@ -63,7 +63,24 @@ import Graft.Green.Internal (greenNodeReversed)
 -- a stack of open node kinds and starting positions. Constructors are hidden.
 -- Keeping old builder values permits independent branches without mutation.
 data Builder kind = Builder !Int [GreenElement kind] [(kind, Int)]
-  deriving (Eq, Show)
+  deriving (Eq)
+
+-- | Shows a sequence of 'startNode' and 'emitElement' calls that rebuilds an
+-- equal builder.
+instance Show kind => Show (Builder kind) where
+  showsPrec precedence (Builder count pending parents) = go precedence (reverse steps)
+    where
+      elements = reverse pending
+      opened position = [kind | (kind, start) <- reverse parents, start == position]
+      steps = concat
+        [ map Left (opened position) ++ [Right element | element <- take 1 rest]
+        | (position, rest) <- zip [0 .. count] (iterate (drop 1) elements)
+        ]
+      go _ [] = showString "emptyBuilder"
+      go outer (Left kind : earlier) = showParen (outer > 10) $
+        showString "startNode " . showsPrec 11 kind . showChar ' ' . go 11 earlier
+      go outer (Right element : earlier) = showParen (outer > 10) $
+        showString "emitElement " . showsPrec 11 element . showChar ' ' . go 11 earlier
 
 instance NFData kind => NFData (Builder kind) where
   rnf (Builder _ pending parents) = rnf pending `seq` rnf parents
@@ -73,6 +90,9 @@ instance NFData kind => NFData (Builder kind) where
 -- it records neither builder provenance nor historical validity. Use it with
 -- the corresponding construction history. Closing nodes collapses positions;
 -- later emission can make an old position numerically valid again.
+--
+-- 'Show' displays the position, as @Checkpoint 3@; there is no expression
+-- that builds a checkpoint without a builder.
 newtype Checkpoint = Checkpoint Int
   deriving (Eq, Show)
 

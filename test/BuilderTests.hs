@@ -221,6 +221,15 @@ regressions = once $ conjoin
       -- The collapsed root and new token precede the revived position.
       emptyNode <- finishNode opened
       startNodeAt (checkpoint emptyBuilder) 7 emptyNode >>= finishNode >>= runBuilder)
+  -- Show prints calls that rebuild an equal builder, with open nodes placed
+  -- at their start positions even when they were opened at a checkpoint.
+  , either (\err -> counterexample (show err) False) (\opened -> show opened === concat
+      [ "emitElement (Token (greenToken 1 \"b\")) "
+      , "(emitElement (Token (greenToken 1 \"a\")) (startNode 8 (startNode 9 emptyBuilder)))"
+      ]) (do
+        let initial = startNode 9 blank
+        startNodeAt (checkpoint initial) 8 (emitToken 1 "b" (emitToken 1 "a" initial)))
+  , show (emptyBuilder :: Builder Int) === "emptyBuilder"
   , conjoin
       [ nodeTextLength hugeRoot === 2 ^ hugeDepth
       , nodeKind hugeRoot === 9

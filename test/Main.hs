@@ -399,6 +399,10 @@ cursorRegressions = once $ conjoin
   , offsetPaths (tokenAtOffset 0 (rootCursor (tok ""))) === NoToken
   , fmap cursorPath (cursorFirstToken (rootCursor (tok ""))) === Just []
   , cursorRange sharedSecond === rangeFromLength 1 1
+  -- Abstract values show as the public calls that rebuild them.
+  , show (Just (rangeFromLength 5 3)) === "Just (rangeFromLength 5 3)"
+  , show (Node (greenNode Group [Token (greenToken Space "\t")]))
+      === "Node (greenNode Group [Token (greenToken Space \"\\t\")])"
   , cursorPath sharedSecond === [1]
   , cursorGreen sharedSecond === shared
   , renderElement (cursorTree (replaceFocus (tok "long") sharedSecond)) === "along"
