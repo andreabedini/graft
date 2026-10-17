@@ -2,7 +2,9 @@
 
 -- | An immutable red-tree zipper over green elements. A cursor denotes an
 -- occurrence in one tree snapshot, with parents, siblings and absolute offsets.
--- Navigation does not edit or rebuild green nodes. No pointer identity is exposed.
+-- Edits through a cursor return a cursor on the edited snapshot, so a series
+-- of edits can continue navigating; old cursors keep their snapshots.
+-- No pointer identity is exposed.
 module Graft.Cursor
   ( Cursor
   , rootCursor
@@ -30,6 +32,8 @@ module Graft.Cursor
   , tokenAtOffset
   , coveringElement
   , replaceFocus
+  , modifyFocus
+  , cursorTree
   , spliceChildrenFocus
   , insertChildFocus
   , removeChildFocus
@@ -252,43 +256,51 @@ coveringElement query cursor
           index = firstChildEndingAtOrAfter node (rangeEnd query - start)
       _ -> current
 
--- | Replace the focused element and return a new green root. Only ancestors
--- and their child-list prefixes are rebuilt; other green elements and list
--- suffixes are reused. The cursor and its original snapshot stay unchanged.
--- Replacement may change kind or switch node/token form, including at the root.
--- Cost follows the sum of ancestor child counts. Start a new cursor to navigate
--- the result; offsets of later occurrences may have changed.
-replaceFocus :: GreenElement kind -> Cursor kind -> GreenElement kind
-replaceFocus replacement (Cursor _ offset _ context) =
-  cursorGreen (cursorRoot (Cursor replacement offset True context))
+-- | Replace the focused element, keeping the cursor at the same path and
+-- start offset. The result navigates the edited snapshot: ancestors are
+-- rebuilt lazily when you move up or sideways, so a run of edits in one
+-- region pays for each ancestor once. The original cursor and its snapshot
+-- stay unchanged. Replacement may change kind or switch node/token form,
+-- including at the root. Use 'cursorTree' to obtain the edited tree.
+replaceFocus :: GreenElement kind -> Cursor kind -> Cursor kind
+replaceFocus replacement (Cursor _ offset _ context) = Cursor replacement offset True context
 
--- | Splice immediate children of a focused node and return a new green root.
--- Bounds and sharing follow 'Edit.spliceChildren'. A token focus returns
--- 'CannotEditTokenChildren' before checking boundaries. The cursor retains its
--- original snapshot; start a new cursor on the result to observe shifted paths
--- and byte ranges. No punctuation, whitespace or comments are inserted implicitly.
+-- | Apply a function to the focused element, as 'replaceFocus'.
+modifyFocus :: (GreenElement kind -> GreenElement kind) -> Cursor kind -> Cursor kind
+modifyFocus edit cursor = replaceFocus (edit (cursorGreen cursor)) cursor
+
+-- | The whole tree that this cursor navigates, including every edit made
+-- through it. Rebuilds the ancestors of replaced foci, sharing everything else.
+cursorTree :: Cursor kind -> GreenElement kind
+cursorTree = cursorGreen . cursorRoot
+
+-- | Splice immediate children of a focused node, keeping the focus on that
+-- node. Bounds and sharing follow 'Edit.spliceChildren'. A token focus returns
+-- 'CannotEditTokenChildren' before checking boundaries. The original cursor
+-- retains its snapshot; the result observes shifted paths and byte ranges.
+-- No punctuation, whitespace or comments are inserted implicitly.
 spliceChildrenFocus
   :: Int -> Int -> [GreenElement kind] -> Cursor kind
-  -> Either ChildEditError (GreenElement kind)
+  -> Either ChildEditError (Cursor kind)
 spliceChildrenFocus start end replacements =
   editChildrenFocus (Edit.spliceChildren start end replacements)
 
--- | Insert one child into a focused node. Its child count appends. Returns a
--- new root with the same validation and snapshot rules as 'spliceChildrenFocus'.
+-- | Insert one child into a focused node. Its child count appends. Validation
+-- and focus follow 'spliceChildrenFocus'.
 insertChildFocus
   :: Int -> GreenElement kind -> Cursor kind
-  -> Either ChildEditError (GreenElement kind)
+  -> Either ChildEditError (Cursor kind)
 insertChildFocus index element = editChildrenFocus (Edit.insertChild index element)
 
--- | Remove an existing child of a focused node, returning a new root. Removing
--- the last child leaves an empty node. Follows 'spliceChildrenFocus' snapshot
--- rules; the child count is out of bounds for removal.
-removeChildFocus :: Int -> Cursor kind -> Either ChildEditError (GreenElement kind)
+-- | Remove an existing child of a focused node. Removing the last child
+-- leaves an empty node. Follows 'spliceChildrenFocus'; the child count is out
+-- of bounds for removal.
+removeChildFocus :: Int -> Cursor kind -> Either ChildEditError (Cursor kind)
 removeChildFocus index = editChildrenFocus (Edit.removeChild index)
 
 editChildrenFocus
   :: (GreenNode kind -> Either ChildEditError (GreenNode kind))
-  -> Cursor kind -> Either ChildEditError (GreenElement kind)
+  -> Cursor kind -> Either ChildEditError (Cursor kind)
 editChildrenFocus edit cursor = case cursorGreen cursor of
   Token _ -> Left CannotEditTokenChildren
   Node node -> do

@@ -140,7 +140,7 @@ propTokenEdit subtree = forAll genText $ \newText ->
       Right cursor -> case castToken cursor :: Maybe NameView of
         Nothing -> counterexample "name view failed" False
         Just view ->
-          let edited = replaceFocus (compile (Leaf Name newText)) (tokenSyntax view)
+          let edited = cursorTree (replaceFocus (compile (Leaf Name newText)) (tokenSyntax view))
           in conjoin
             [ matches (modelReplace path (Leaf Name newText) model) edited
             , Text.unpack (renderElement edited) === prefix ++ newText ++ suffix
@@ -158,7 +158,7 @@ propNodeEdit subtree replacement =
         Left err -> counterexample (show err) False
         Right cursor -> case castNode cursor :: Maybe AnyNode of
           Nothing -> counterexample "node view failed" False
-          Just view -> case insertChildFocus index (compile replacement) (nodeSyntax view) of
+          Just view -> case cursorTree <$> insertChildFocus index (compile replacement) (nodeSyntax view) of
             Left err -> counterexample (show err) False
             Right edited -> conjoin
               [ matches (modelReplace path (Branch kind (take index items ++ [replacement] ++ drop index items)) model) edited

@@ -171,7 +171,7 @@ checkFixtures = do
         Text.concat (concatMap lineText [501 .. 1000])]
   assert "document source" (renderElement document == before)
   assert "repeated exact edits" (renderElement updated == expected)
-  assert "focus/path edit agreement" (replaceFocus (Token (greenToken Number "100")) cursor == updated)
+  assert "focus/path edit agreement" (cursorTree (replaceFocus (Token (greenToken Number "100")) cursor) == updated)
   assert "original snapshot preserved" (renderElement document == before)
   assert "typed groups" (length (astChildren (rootCursor document) :: [Grouped]) == 1000)
   assert "history count" (length (snapshots 100 path document) == 101)

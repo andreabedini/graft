@@ -38,8 +38,8 @@ setNumberValue value literal = do
   oldValue <- numberValue literal
   let focus = tokenSyntax literal
   pure $ if oldValue == value
-    then cursorGreen (cursorRoot focus) -- Retain spelling such as 001.
-    else replaceFocus (Token (greenToken Number (Text.pack (show value)))) focus
+    then cursorTree focus -- Retain spelling such as 001.
+    else cursorTree (replaceFocus (Token (greenToken Number (Text.pack (show value)))) focus)
 
 updateValue :: Integer -> GreenElement Kind -> Maybe (GreenElement Kind)
 updateValue value root = do

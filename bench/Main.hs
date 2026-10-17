@@ -88,11 +88,11 @@ deepBench depth = bgroup (show depth)
         , bench "descend" $ whnf (cursorEnd . focused) tree
         , bench "replace-path" $ whnf (elementTextLength . checked . replaceAt path replacement) tree
         , bench "offset" $ whnf (offsetEnd 1 . rootCursor) tree
-        , bench "focus-and-replace" $ whnf (elementTextLength . replaceFocus replacement . focused) tree
+        , bench "focus-and-replace" $ whnf (elementTextLength . cursorTree . replaceFocus replacement . focused) tree
         ]
   , env (pure (PreparedCursor (checked (cursorAt (replicate (depth + 1) 0)
       (rootCursor (Node (deepTree depth))))))) $ \prepared -> bgroup "focused"
-      [ bench "replace" $ whnf (elementTextLength . replaceFocus
+      [ bench "replace" $ whnf (elementTextLength . cursorTree . replaceFocus
           (Token (greenToken Number (Text.singleton '2')))) (preparedCursor prepared)
       , bench "root" $ whnf (cursorEnd . cursorRoot) (preparedCursor prepared)
       ]

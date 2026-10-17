@@ -89,7 +89,8 @@ propNestedSplice = forAll (genTarget False) $ \(model, path, kind, items) ->
       Left err -> counterexample (show err) False
       Right focus -> conjoin
         [ matches expected edited
-        , spliceChildrenFocus start end (map compile replacements) focus === edited
+        , fmap cursorTree (spliceChildrenFocus start end (map compile replacements) focus) === edited
+        , fmap cursorPath (spliceChildrenFocus start end (map compile replacements) focus) === Right path
         , cursorGreen (cursorRoot focus) === root
         , cursorPath focus === path
         , Text.unpack (renderElement root) === source model
@@ -121,7 +122,7 @@ propInsertion = forAll (genTarget False) $ \(model, path, kind, items) ->
         , (edited >>= removeChildAt path index) === Right root
         , case cursorAt path (rootCursor root) of
             Left err -> counterexample (show err) False
-            Right focus -> insertChildFocus index element focus === edited
+            Right focus -> fmap cursorTree (insertChildFocus index element focus) === edited
         ]
 
 propRemoval :: Property
@@ -138,7 +139,7 @@ propRemoval = forAll (genTarget True) $ \(model, path, kind, items) ->
       , (direct >>= insertChild index (compile (items !! index))) === Right (asNode target)
       , case cursorAt path (rootCursor root) of
           Left err -> counterexample (show err) False
-          Right focus -> removeChildFocus index focus === edited
+          Right focus -> fmap cursorTree (removeChildFocus index focus) === edited
       ]
 
 propNoOp :: Property
@@ -168,7 +169,7 @@ propInvalidBounds = forAll (genTarget False) $ \(model, path, kind, items) ->
         , spliceChildrenAt path start end [] root === Left err
         , case cursorAt path (rootCursor root) of
             Left pathErr -> counterexample (show pathErr) False
-            Right focus -> spliceChildrenFocus start end [] focus === Left err
+            Right focus -> fmap cursorTree (spliceChildrenFocus start end [] focus) === Left err
         ]
     | (start, end, err) <- bad
     ] ++
@@ -188,9 +189,9 @@ propInvalidTargets model = conjoin
         , case cursorAt path (rootCursor root) of
             Left err -> counterexample (show err) False
             Right focus -> conjoin
-              [ spliceChildrenFocus (-1) (-2) [] focus === Left CannotEditTokenChildren
-              , insertChildFocus (-1) root focus === Left CannotEditTokenChildren
-              , removeChildFocus (-1) focus === Left CannotEditTokenChildren
+              [ fmap cursorTree (spliceChildrenFocus (-1) (-2) [] focus) === Left CannotEditTokenChildren
+              , fmap cursorTree (insertChildFocus (-1) root focus) === Left CannotEditTokenChildren
+              , fmap cursorTree (removeChildFocus (-1) focus) === Left CannotEditTokenChildren
               ]
         , badPath (path ++ [0]) CannotDescendIntoToken
         , badPath (path ++ [-1]) (NegativeChildIndex (-1))

@@ -209,15 +209,54 @@ propCursorTokenNavigation model =
             , fmap cursorPath (cursorPreviousToken focus) === maybeHead (reverse before)
             ]
 
+-- Every occurrence reachable from an edited cursor, by any navigation, agrees
+-- with a fresh cursor on the edited tree; a second edit continues from there.
+propCursorEditNavigation :: Model -> Model -> Model -> Property
+propCursorEditNavigation model first second =
+  forAll (elements (contexts model)) $ \(path, _, _, _) ->
+    case cursorAt path (rootCursor (compile model)) of
+      Left err -> counterexample (show err) False
+      Right focus ->
+        let edited = replaceFocus (compile first) focus
+            tree = cursorTree edited
+            fresh = rootCursor tree
+            moved =
+              [ cursorParent, cursorNextSibling, cursorPreviousSibling, cursorFirstChild, cursorLastChild
+              , \cursor -> cursorNextSibling cursor >>= cursorParent
+              , \cursor -> cursorPreviousSibling cursor >>= cursorNextSibling >>= cursorParent
+              ]
+        in conjoin
+            [ map observe (cursorDescendants (cursorRoot edited)) === map observe (cursorDescendants fresh)
+            , conjoin
+                [ fmap observe (step edited) === fmap observe (either (const Nothing) step (cursorAt path fresh))
+                | step <- moved
+                ]
+            , conjoin
+                [ counterexample (show other) $
+                    fmap (cursorTree . replaceFocus (compile second)) (cursorAt other (cursorRoot edited))
+                      === (replaceAt path (compile first) (compile model) >>= replaceAt other (compile second))
+                | (other, _, _, _) <- contexts model
+                ]
+            , fmap observe (cursorParent edited >>= cursorFirstChild >>= cursorParent)
+                === fmap observe (cursorParent edited)
+            ]
+  where
+    observe cursor = (cursorPath cursor, cursorRange cursor, cursorGreen cursor)
+
 propCursorReplacement :: Model -> Model -> Property
 propCursorReplacement model replacement =
   forAll (elements (contexts model)) $ \(path, prefix, selected, suffix) ->
     case cursorAt path (rootCursor (compile model)) of
       Left err -> counterexample (show err) False
       Right focus ->
-        let edited = replaceFocus (compile replacement) focus
+        let editedFocus = replaceFocus (compile replacement) focus
+            edited = cursorTree editedFocus
             expectedRange = rangeFromLength (byteLength prefix) (byteLength (source replacement))
         in conjoin
+            [ cursorPath editedFocus === path
+            , cursorRange editedFocus === expectedRange
+            , cursorGreen editedFocus === compile replacement
+            ] .&&. conjoin
             [ Text.unpack (renderElement edited) === prefix ++ source replacement ++ suffix
             , counterexample "rebuilt caches" (validCaches edited)
             , fmap cursorRange (cursorAt path (rootCursor edited)) === Right expectedRange
@@ -348,7 +387,7 @@ cursorRegressions = once $ conjoin
   , cursorRange sharedSecond === rangeFromLength 1 1
   , cursorPath sharedSecond === [1]
   , cursorGreen sharedSecond === shared
-  , renderElement (replaceFocus (tok "long") sharedSecond) === "along"
+  , renderElement (cursorTree (replaceFocus (tok "long") sharedSecond)) === "along"
   , cursorRange sharedSecond === rangeFromLength 1 1
   , rangeEnd (cursorRange hugeCursor) === 2 ^ (40 :: Int)
   , offsetPaths (tokenAtOffset (2 ^ (40 :: Int)) hugeCursor)
@@ -418,6 +457,7 @@ main = do
     , run "cursor parent, child and sibling navigation" propCursorNavigation
     , run "cursor token navigation" propCursorTokenNavigation
     , run "persistent cursor replacement and shifted ranges" propCursorReplacement
+    , run "navigation and repeated edits from an edited cursor" propCursorEditNavigation
     , run "cursor invalid paths" propCursorInvalidPaths
     , run "boundary-aware token lookup" propCursorOffsetLookup
     , run "covering range lookup" propCoveringRange
