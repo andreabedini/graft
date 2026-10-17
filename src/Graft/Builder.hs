@@ -1,10 +1,46 @@
 {-# LANGUAGE BangPatterns #-}
 
--- | Pure, persistent Rowan-style construction and retroactive wrapping.
--- Lexing and parsing remain the caller's responsibility. Trivia is supplied
--- as ordinary token text; construction performs no grammar validation.
+-- | Rowan-style construction and retroactive wrapping. Lexing and parsing
+-- remain the caller's responsibility. Trivia is supplied as ordinary token
+-- text; construction performs no grammar validation.
+--
+-- A parser usually runs in the 'Build' monad, where 'buildNode' brackets a
+-- node so that it cannot be left open:
+--
+-- @
+-- expression :: Build Kind ()
+-- expression = do
+--   start <- buildCheckpoint
+--   buildToken Number "1"
+--   buildNodeAt start Binary $ do
+--     buildToken Whitespace " "
+--     buildToken Plus "+"
+--     buildToken Whitespace " "
+--     buildToken Number "2"
+--
+-- tree :: Either BuilderError (GreenNode Kind)
+-- tree = execBuild (buildNode Root expression)
+-- @
+--
+-- 'Build' is a thin layer over the pure 'Builder' value, which remains
+-- available for code that wants to keep or branch builder states.
 module Graft.Builder
-  ( Builder
+  ( -- * Building in a monad
+    Build
+  , runBuild
+  , execBuild
+  , buildNode
+  , buildNodeAt
+  , buildToken
+  , buildElement
+  , buildCheckpoint
+  , buildStartNode
+  , buildStartNodeAt
+  , buildFinishNode
+  , saveBuilder
+  , restoreBuilder
+    -- * Pure builder values
+  , Builder
   , Checkpoint
   , BuilderError (..)
   , emptyBuilder
@@ -113,3 +149,84 @@ runBuilder (Builder count pending parents) = case parents of
     [Node node] -> Right node
     [Token _] -> Left TokenRoot
     _ -> Left (MultipleRoots count)
+
+-- | A construction in progress: a state monad over 'Builder' that stops at
+-- the first 'BuilderError'.
+newtype Build kind a = Build (Builder kind -> Either BuilderError (a, Builder kind))
+
+instance Functor (Build kind) where
+  fmap f (Build run) = Build $ \builder -> do
+    (value, next) <- run builder
+    pure (f value, next)
+
+instance Applicative (Build kind) where
+  pure value = Build $ \builder -> Right (value, builder)
+  Build runFunction <*> Build runValue = Build $ \builder -> do
+    (f, next) <- runFunction builder
+    (value, final) <- runValue next
+    pure (f value, final)
+
+instance Monad (Build kind) where
+  Build run >>= continue = Build $ \builder -> do
+    (value, next) <- run builder
+    let Build runNext = continue value
+    runNext next
+
+-- | Run a construction from 'emptyBuilder' and validate it with 'runBuilder'.
+runBuild :: Build kind a -> Either BuilderError (a, GreenNode kind)
+runBuild (Build run) = do
+  (value, builder) <- run emptyBuilder
+  root <- runBuilder builder
+  pure (value, root)
+
+-- | Run a construction and return only its root node.
+execBuild :: Build kind a -> Either BuilderError (GreenNode kind)
+execBuild = fmap snd . runBuild
+
+-- | Build a node around the elements that the body emits. The node is closed
+-- when the body returns, so it cannot be left open or closed twice.
+buildNode :: kind -> Build kind a -> Build kind a
+buildNode kind body = buildStartNode kind *> body <* buildFinishNode
+
+-- | Build a node that starts at an earlier checkpoint, wrapping the elements
+-- emitted since then together with those the body emits. Fails as
+-- 'startNodeAt' does.
+buildNodeAt :: Checkpoint -> kind -> Build kind a -> Build kind a
+buildNodeAt marker kind body = buildStartNodeAt marker kind *> body <* buildFinishNode
+
+-- | Emit a token, as 'emitToken'.
+buildToken :: kind -> Text -> Build kind ()
+buildToken kind text = modifyBuilder (emitToken kind text)
+
+-- | Emit an existing green element, as 'emitElement'.
+buildElement :: GreenElement kind -> Build kind ()
+buildElement element = modifyBuilder (emitElement element)
+
+-- | Mark the current end of the pending forest, as 'checkpoint'.
+buildCheckpoint :: Build kind Checkpoint
+buildCheckpoint = Build $ \builder -> Right (checkpoint builder, builder)
+
+-- | Open a node that a later 'buildFinishNode' closes, for parsers whose
+-- start and finish happen in different places. Prefer 'buildNode'.
+buildStartNode :: kind -> Build kind ()
+buildStartNode kind = modifyBuilder (startNode kind)
+
+-- | Open a node at an earlier checkpoint, as 'startNodeAt'. Prefer 'buildNodeAt'.
+buildStartNodeAt :: Checkpoint -> kind -> Build kind ()
+buildStartNodeAt marker kind = Build $ \builder -> (,) () <$> startNodeAt marker kind builder
+
+-- | Close the innermost open node, as 'finishNode'.
+buildFinishNode :: Build kind ()
+buildFinishNode = Build $ \builder -> (,) () <$> finishNode builder
+
+-- | The current builder state. Together with 'restoreBuilder' this lets a
+-- backtracking parser return to an earlier state after a failed alternative.
+saveBuilder :: Build kind (Builder kind)
+saveBuilder = Build $ \builder -> Right (builder, builder)
+
+-- | Replace the current builder state with a saved one.
+restoreBuilder :: Builder kind -> Build kind ()
+restoreBuilder saved = Build $ \_ -> Right ((), saved)
+
+modifyBuilder :: (Builder kind -> Builder kind) -> Build kind ()
+modifyBuilder step = Build $ \builder -> let !next = step builder in Right ((), next)

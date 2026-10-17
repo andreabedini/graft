@@ -80,6 +80,33 @@ emit (Branch kind items) builder =
 emitAll :: [Tree] -> Builder Int -> Either BuilderError (Builder Int)
 emitAll items builder = foldM (flip emit) builder items
 
+-- The monadic layer streams the same events with bracketed nodes.
+build :: Tree -> Build Int ()
+build (Leaf kind text) = buildToken kind (Text.pack text)
+build (Branch kind items) = buildNode kind (mapM_ build items)
+
+propMonadicConstruction :: Tree -> Property
+propMonadicConstruction tree = conjoin
+  [ matches (Branch 9 [tree]) (execBuild (buildNode 9 (build tree)))
+  , fmap fst (runBuild (buildNode 9 (build tree >> pure 'x'))) === Right 'x'
+  ]
+
+propMonadicWrapping :: Property
+propMonadicWrapping = forAll ((,,) <$> genForest <*> genForest <*> genForest) $ \(prefix, middle, suffix) ->
+  matches (Branch 9 (prefix ++ [Branch 8 (middle ++ suffix)])) $ execBuild $ buildNode 9 $ do
+    mapM_ build prefix
+    marker <- buildCheckpoint
+    mapM_ build middle
+    buildNodeAt marker 8 (mapM_ build suffix)
+
+propMonadicBacktracking :: Property
+propMonadicBacktracking = forAll ((,) <$> genForest <*> genForest) $ \(abandoned, kept) ->
+  matches (Branch 9 kept) $ execBuild $ buildNode 9 $ do
+    saved <- saveBuilder
+    mapM_ build abandoned
+    restoreBuilder saved
+    mapM_ build kept
+
 propConstruction :: Tree -> Property
 propConstruction tree = matches (Branch 9 [tree]) $ do
   builder <- emit tree (startNode 9 emptyBuilder)
@@ -210,6 +237,20 @@ regressions = once $ conjoin
       Right node -> node
       Left err -> error (show err)
 
+monadicErrors :: Property
+monadicErrors = once $ conjoin
+  [ execBuild (buildFinishNode :: Build Int ()) === Left NoOpenNode
+  , execBuild (buildStartNode (9 :: Int)) === Left (UnclosedNodes 1)
+  , execBuild (pure () :: Build Int ()) === Left EmptyBuilder
+  , execBuild (buildToken (1 :: Int) "a") === Left TokenRoot
+  , execBuild (buildNode (9 :: Int) (buildToken 1 "a") >> buildNode 9 (pure ())) === Left (MultipleRoots 2)
+  -- A checkpoint taken inside a node lies past the end once it closes.
+  , execBuild (buildNode (9 :: Int) (buildToken 1 "a"
+      >> buildNode 8 (buildToken 1 "b" >> buildToken 1 "c" >> buildCheckpoint)
+      >>= \marker -> buildNodeAt marker 7 (pure ())))
+      === Left (CheckpointOutOfBounds 3 2)
+  ]
+
 builderProperties :: [(String, Property)]
 builderProperties =
   [ ("builder streamed construction, rendering and caches", property propConstruction)
@@ -219,4 +260,8 @@ builderProperties =
   , ("builder checkpoint bounds and recovery", propCheckpointBounds)
   , ("builder balanced construction at every close", propBalance)
   , ("builder empty, root, checkpoint lifetime and shared-length regressions", regressions)
+  , ("monadic builder construction and results", property propMonadicConstruction)
+  , ("monadic builder checkpoint wrapping", propMonadicWrapping)
+  , ("monadic builder saved states", propMonadicBacktracking)
+  , ("monadic builder errors", monadicErrors)
   ]

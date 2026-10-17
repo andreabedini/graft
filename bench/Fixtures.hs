@@ -6,7 +6,7 @@ module Fixtures
   ( Kind (..), Prepared (..), PreparedCursor (..), Named (..), Numbered (..), Grouped (..)
   , wideSource, wideTree, deepTree, chainTree, chainSource, documentTree, documentSource
   , forceElement, checked, selected, cached, cursorEnd, siblingSum
-  , buildTokens, buildReuse, buildCheckpoint, editMany, snapshots
+  , buildTokens, buildMonadic, buildReuse, buildWrapped, editMany, snapshots
   , checkFixtures
   ) where
 
@@ -126,12 +126,19 @@ buildTokens texts = checked (runBuilder (checked (finishNode emitted)))
     go builder (text : rest) = let next = emitToken Name text builder
       in next `seq` go next rest
 
+buildMonadic :: [Text] -> GreenNode Kind
+buildMonadic texts = checked (execBuild (buildNode Root (go texts)))
+  where
+    go [] = pure ()
+    go [text] = buildToken Number text
+    go (text : rest) = buildToken Name text >> go rest
+
 buildReuse :: GreenNode Kind -> GreenNode Kind
 buildReuse node = checked (runBuilder (checked (finishNode emitted)))
   where emitted = List.foldl' (flip emitElement) (startNode Root emptyBuilder) (nodeChildren node)
 
-buildCheckpoint :: GreenNode Kind -> GreenNode Kind
-buildCheckpoint node = checked (runBuilder closed)
+buildWrapped :: GreenNode Kind -> GreenNode Kind
+buildWrapped node = checked (runBuilder closed)
   where
     opened = startNode Root emptyBuilder
     marker = checkpoint opened
@@ -188,7 +195,8 @@ checkFixtures = do
       assert "wide exact source" (renderNode node == Text.concat texts)
       assert "builder tokens" (buildTokens texts == node)
       assert "builder reuse" (buildReuse node == node)
-      assert "checkpoint source" (renderNode (buildCheckpoint node) == Text.concat texts)
+      assert "monadic builder" (buildMonadic texts == node)
+      assert "checkpoint source" (renderNode (buildWrapped node) == Text.concat texts)
       assert "wide UTF-8 cache" (nodeTextLength node == sum
         [4 + fromIntegral (length (show index)) | index <- [1 .. count]])
       assert "last offset" (cursorEnd (checked (cursorChildAt (count - 1) root)) == nodeTextLength node)

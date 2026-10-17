@@ -41,6 +41,7 @@ wideBench size = bgroup (show size)
   [ env (pure (wideSource size)) $ \texts -> bgroup "construct"
       [ bench "direct" $ whnf (cached . wideTree) texts
       , bench "builder-tokens" $ whnf (cached . buildTokens) texts
+      , bench "builder-monad" $ whnf (cached . buildMonadic) texts
       ]
   , env (pure (Prepared (Node (wideTree (wideSource size))))) $ \prepared ->
       let tree = preparedTree prepared
@@ -52,7 +53,7 @@ wideBench size = bgroup (show size)
       in bgroup "prepared"
         [ bench "render" $ nf renderElement tree
         , bench "builder-reuse" $ whnf (cached . buildReuse) node
-        , bench "builder-checkpoint" $ whnf (cached . buildCheckpoint) node
+        , bench "builder-checkpoint" $ whnf (cached . buildWrapped) node
         , bench "child-first" $ whnf (endAt 0) tree
         , bench "child-middle" $ whnf (endAt (size `div` 2)) tree
         , bench "child-last" $ whnf (endAt (size - 1)) tree
