@@ -12,12 +12,16 @@ module Graft.Range
   , rangeContainsRange
   ) where
 
+import Control.DeepSeq (NFData (..))
 import Graft.Green (TextLength)
 
 -- | A half-open interval with start no greater than end. The constructor is
 -- hidden; neither endpoint is required to be a Unicode character boundary.
 data TextRange = TextRange !TextLength !TextLength
   deriving (Eq, Ord, Show)
+
+instance NFData TextRange where
+  rnf (TextRange _ _) = ()
 
 -- | Construct a range from start and end, rejecting reversed endpoints.
 textRange :: TextLength -> TextLength -> Maybe TextRange

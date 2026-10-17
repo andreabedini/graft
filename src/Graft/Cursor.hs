@@ -1,4 +1,5 @@
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE DeriveTraversable #-}
 
 -- | An immutable red-tree zipper over green elements. A cursor denotes an
 -- occurrence in one tree snapshot, with parents, siblings and absolute offsets.
@@ -40,6 +41,7 @@ module Graft.Cursor
   ) where
 
 import Control.Applicative ((<|>))
+import Control.DeepSeq (NFData (..))
 import Graft.Edit (ChildEditError (..), Path, PathError (..))
 import qualified Graft.Edit as Edit
 import Graft.Green
@@ -60,6 +62,13 @@ data Context kind
 -- The flag records that the focus has been replaced since the parent was
 -- last rebuilt; the parent is rebuilt lazily on the way up or sideways.
 data Cursor kind = Cursor !(GreenElement kind) !TextLength !Bool !(Context kind)
+
+-- | Forces the focus and every ancestor in the cursor's context.
+instance NFData kind => NFData (Cursor kind) where
+  rnf (Cursor focus _ _ context) = rnf focus `seq` go context
+    where
+      go Top = ()
+      go (Crumb parent _ _ above _) = rnf parent `seq` go above
 
 instance Show kind => Show (Cursor kind) where
   showsPrec precedence cursor = showParen (precedence > 10) $
@@ -211,7 +220,12 @@ cursorPreviousToken cursor =
 -- | Offset lookup is unambiguous inside a token and may select both tokens
 -- at a shared boundary. The pair is ordered left to right.
 data TokenAtOffset a = NoToken | SingleToken a | BetweenTokens a a
-  deriving (Eq, Show)
+  deriving (Eq, Show, Functor, Foldable, Traversable)
+
+instance NFData a => NFData (TokenAtOffset a) where
+  rnf NoToken = ()
+  rnf (SingleToken token) = rnf token
+  rnf (BetweenTokens left right) = rnf left `seq` rnf right
 
 -- | Find nonempty tokens touching an absolute byte offset within this focus.
 -- Uses closed endpoint contact despite the half-open ranges: start and EOF

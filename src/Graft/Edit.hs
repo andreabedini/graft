@@ -14,6 +14,8 @@ module Graft.Edit
   , removeChildAt
   ) where
 
+import Control.DeepSeq (NFData (..))
+import Control.Exception (Exception)
 import Data.Bifunctor (first)
 import Graft.Green
 import Graft.Green.Internal (childAt, childCount, setChild, spliceChildrenUnchecked)
@@ -31,6 +33,13 @@ data PathError
   | ChildIndexOutOfBounds Int
   | CannotDescendIntoToken
   deriving (Eq, Show)
+
+instance Exception PathError
+
+instance NFData PathError where
+  rnf (NegativeChildIndex _) = ()
+  rnf (ChildIndexOutOfBounds _) = ()
+  rnf CannotDescendIntoToken = ()
 
 -- | Look up a subtree or token. Takes time proportional to path depth.
 elementAt :: Path -> GreenElement kind -> Either PathError (GreenElement kind)
@@ -76,6 +85,12 @@ data ChildEditError
   | ReversedChildRange Int Int
   | ChildBoundaryOutOfBounds Int
   deriving (Eq, Show)
+
+instance Exception ChildEditError
+
+instance NFData ChildEditError where
+  rnf (ChildEditPathError err) = rnf err
+  rnf _ = ()
 
 -- | @spliceChildren start end replacements node@ replaces the half-open child
 -- range @[start,end)@. Both boundaries must lie between zero and the child

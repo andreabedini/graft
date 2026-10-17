@@ -38,6 +38,7 @@ library
     exposed-modules:  Graft Graft.Green Graft.Green.Internal Graft.Edit Graft.Range Graft.Cursor Graft.Builder Graft.Ast
     build-depends:
         base >=4.18 && <4.22,
+        deepseq >=1.4 && <1.6,
         primitive >=0.8 && <0.10,
         text >=2.0 && <2.2
     hs-source-dirs:   src

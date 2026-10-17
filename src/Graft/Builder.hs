@@ -53,6 +53,8 @@ module Graft.Builder
   , runBuilder
   ) where
 
+import Control.DeepSeq (NFData (..))
+import Control.Exception (Exception)
 import Data.Text (Text)
 import Graft.Green
 import Graft.Green.Internal (greenNodeReversed)
@@ -63,6 +65,9 @@ import Graft.Green.Internal (greenNodeReversed)
 data Builder kind = Builder !Int [GreenElement kind] [(kind, Int)]
   deriving (Eq, Show)
 
+instance NFData kind => NFData (Builder kind) where
+  rnf (Builder _ pending parents) = rnf pending `seq` rnf parents
+
 -- | A position in the pending forest, counting nodes and tokens, not bytes.
 -- Like Rowan's checkpoint, this is a positional marker, not an owned handle:
 -- it records neither builder provenance nor historical validity. Use it with
@@ -70,6 +75,9 @@ data Builder kind = Builder !Int [GreenElement kind] [(kind, Int)]
 -- later emission can make an old position numerically valid again.
 newtype Checkpoint = Checkpoint Int
   deriving (Eq, Show)
+
+instance NFData Checkpoint where
+  rnf (Checkpoint _) = ()
 
 -- | Construction failures. Failed operations leave the supplied builder
 -- available unchanged. Checkpoint error fields are marker position followed
@@ -83,6 +91,11 @@ data BuilderError
   | CheckpointOutOfBounds Int Int
   | CheckpointBeforeCurrentNode Int Int
   deriving (Eq, Show)
+
+instance Exception BuilderError
+
+instance NFData BuilderError where
+  rnf err = err `seq` ()
 
 -- | Empty builder with no open nodes or emitted elements.
 emptyBuilder :: Builder kind

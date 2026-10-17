@@ -29,6 +29,7 @@ module Graft.Green.Internal
   , spliceChildrenUnchecked
   ) where
 
+import Control.DeepSeq (NFData (..))
 import Control.Monad.ST (ST, runST)
 import Data.Foldable (toList)
 import Data.Primitive.PrimArray
@@ -48,7 +49,7 @@ import GHC.Exts (isTrue#, reallyUnsafePtrEquality#)
 -- are not checked for overflow, which needs a logical length beyond
 -- @maxBound :: Int@.
 newtype TextLength = TextLength Int
-  deriving newtype (Eq, Ord, Show, Read, Bounded, Enum, Num, Real, Integral)
+  deriving newtype (Eq, Ord, Show, Read, Bounded, Enum, Num, Real, Integral, NFData)
 
 -- | The UTF-8 byte length of a text, in constant time.
 textLengthOf :: Text -> TextLength
@@ -79,6 +80,16 @@ instance Eq kind => Eq (GreenNode kind) where
     == right@(GreenNode rightKind rightLength rightChildren _) =
       isTrue# (reallyUnsafePtrEquality# left right)
         || (leftLength == rightLength && leftKind == rightKind && leftChildren == rightChildren)
+
+instance NFData kind => NFData (GreenNode kind) where
+  rnf (GreenNode kind _ children _) = rnf kind `seq` foldr (\child rest -> rnf child `seq` rest) () children
+
+instance NFData kind => NFData (GreenToken kind) where
+  rnf (GreenToken kind _ text) = rnf kind `seq` rnf text
+
+instance NFData kind => NFData (GreenElement kind) where
+  rnf (Node node) = rnf node
+  rnf (Token token) = rnf token
 
 -- | Shows the smart-constructor call that rebuilds the node.
 instance Show kind => Show (GreenNode kind) where

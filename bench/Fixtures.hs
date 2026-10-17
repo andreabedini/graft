@@ -21,24 +21,22 @@ import qualified Data.List as List
 data Kind = Root | Group | Name | Number | Trivia
   deriving (Eq, Show)
 
--- This benchmark-only wrapper forces fixtures before the timer starts.
--- It deliberately adds no NFData instance to the library's public types.
+instance NFData Kind where
+  rnf kind = kind `seq` ()
+
+-- These wrappers force fixtures before the timer starts.
 newtype Prepared = Prepared { preparedTree :: GreenElement Kind }
 
 instance NFData Prepared where
-  rnf (Prepared tree) = forceElement tree
+  rnf (Prepared tree) = rnf tree
 
 newtype PreparedCursor = PreparedCursor { preparedCursor :: Cursor Kind }
 
 instance NFData PreparedCursor where
-  rnf (PreparedCursor cursor) = forceElement (cursorGreen (cursorRoot cursor)) `seq`
-    rnf (cursorPath cursor) `seq` cursorEnd cursor `seq` ()
+  rnf (PreparedCursor cursor) = rnf cursor
 
 forceElement :: GreenElement Kind -> ()
-forceElement element = elementKind element `seq` elementTextLength element `seq`
-  case element of
-    Token token -> rnf (tokenText token)
-    Node node -> foldr (\child rest -> forceElement child `seq` rest) () (nodeChildren node)
+forceElement = rnf
 
 newtype Named = Named (Cursor Kind)
 instance AstToken Named where
