@@ -37,10 +37,18 @@ machine was not controlled.
 | --- | --- | --- |
 | 2026-10-10 | List children, before the review changes | [timing 1](../bench/results/2026-10-10/timing-1.csv), [timing 2](../bench/results/2026-10-10/timing-2.csv), [residency](../bench/results/2026-10-10/residency.csv), [environment](../bench/results/2026-10-10/environment.json) |
 | 2026-10-17 | Array children, cursor edits, single-buffer rendering | [timing 1](../bench/results/2026-10-17/timing-1.csv), [timing 2](../bench/results/2026-10-17/timing-2.csv), [residency](../bench/results/2026-10-17/residency.csv), [environment](../bench/results/2026-10-17/environment.json) |
+| 2026-10-17b | As above, plus a single-pass builder and unpacked tokens | [timing 1](../bench/results/2026-10-17b/timing-1.csv), [timing 2](../bench/results/2026-10-17b/timing-2.csv), [residency](../bench/results/2026-10-17b/residency.csv), [environment](../bench/results/2026-10-17b/environment.json) |
 
 Each environment record includes SHA-256 hashes of the sources and the
 executable. The 2026-10-17 run measured the commit "perf: render without
-per-node closures and climb to the root strictly".
+per-node closures and climb to the root strictly", and 2026-10-17b measured
+"docs: plainer Haddock with examples in every module".
+
+The 2026-10-17b run took place while the machine was busy with other work
+(a load average of about 6.6), and 38 and 40 of its 107 cases missed the
+requested precision, with up to 72% spread. Its timings are therefore not
+used in the tables below, except where noted; its residency figures are, since
+live heap doesn't depend on load.
 
 The tables give the smaller and larger mean of the two passes, so a range is
 not a confidence interval. In 2026-10-17, 6 of 107 cases in the first pass and
@@ -130,11 +138,35 @@ less than before because an edit copies one child array per ancestor instead of
 rebuilding list prefixes. A cursor keeps its whole tree alive. Building and
 editing the 10,000-line document allocates 19 MiB in total, down from 59 MiB.
 
+### Later changes (2026-10-17b)
+
+Two changes followed the 2026-10-17 run:
+
+- **Unpacked tokens.** A token's fields are stored directly in the `Token`
+  constructor, saving a box per token. The heap figures for 10,000 lines become:
+
+  | Retained result | 2026-10-17 | 2026-10-17b |
+  | --- | ---: | ---: |
+  | Original tree | 5.037 | 4.274 |
+  | Latest edited tree | 5.037 | 4.274 |
+  | All 101 versions | 12.923 | 12.159 |
+
+  That is about 90 bytes per token, or 19 per source byte. An interleaved
+  comparison of the two builds on the same machine found the timings within
+  noise, except that offset lookup became about 10 ns slower. Unpacking nodes
+  as well saved only a further 3% of heap and made replacements about 45%
+  slower, because cursors had to re-allocate the parent node on every
+  descent, so nodes stay boxed.
+- **Single-pass `finishNode`.** Closing a node now fills the node while walking
+  the pending elements, instead of splitting the list first and copying it.
+  Even on the busy machine, building 10,000 tokens took 158–176 µs, against
+  476–483 µs in the 2026-10-17 run.
+
 ## What the numbers suggest
 
 - Memory per token is the largest remaining cost. Each token occupies an array
-  slot, a `Token` box and a `GreenToken` record with its text, and nothing
-  deduplicates identical tokens such as `;` or a single space. A node cache
+  slot, an offset and a `Token` holding its text, and nothing deduplicates
+  identical tokens such as `;` or a single space. A node cache
   like Rowan's could share them. Its value depends on duplicate rates in real
   parser output, which haven't been measured.
 - Edits in very wide nodes copy the whole child array. A chunked or

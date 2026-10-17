@@ -46,7 +46,10 @@ structure.
 A node stores its kind, its total length, its children in a `SmallArray`, and
 the start of each child relative to the node in a `PrimArray Int`. This is the
 same information Rowan keeps: the child offsets make child access constant time
-and let offset lookup binary-search each level instead of scanning.
+and let offset lookup binary-search each level instead of scanning. A token's
+kind, length and text are stored directly in the element that holds it, which
+saves a box per token. Nodes keep their own box, so that a cursor can point at
+a parent node without re-allocating it.
 
 | Operation | Cost |
 | --- | --- |

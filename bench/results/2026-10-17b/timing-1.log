@@ -1,0 +1,245 @@
+All
+  token
+    32
+      ascii:                OK
+        1.87 ns ±  40 ps,  15 B  allocated,   0 B  copied,  35 MB peak memory
+      unicode:              OK
+        1.81 ns ±  38 ps,  15 B  allocated,   0 B  copied,  35 MB peak memory
+    4096
+      ascii:                OK
+        1.91 ns ±  40 ps,  15 B  allocated,   0 B  copied,  35 MB peak memory
+      unicode:              OK
+        1.75 ns ± 248 ps,  15 B  allocated,   0 B  copied,  35 MB peak memory
+  wide
+    100
+      construct
+        direct:             OK
+          2.37 μs ±  84 ns,  14 KB allocated,   2 B  copied,  35 MB peak memory
+        builder-tokens:     OK
+          1.35 μs ± 255 ns, 8.8 KB allocated,   1 B  copied,  35 MB peak memory
+        builder-monad:      OK
+          1.27 μs ± 163 ns, 8.8 KB allocated,   1 B  copied,  35 MB peak memory
+      prepared
+        render:             OK
+          513  ns ±  19 ns, 629 B  allocated,   0 B  copied,  35 MB peak memory
+        builder-reuse:      OK
+          2.02 μs ±  45 ns, 9.6 KB allocated,   0 B  copied,  35 MB peak memory
+        builder-checkpoint: OK
+          2.02 μs ±  45 ns, 9.8 KB allocated,   1 B  copied,  35 MB peak memory
+        child-first:        OK
+          3.78 ns ± 102 ps,  15 B  allocated,   0 B  copied,  35 MB peak memory
+        child-middle:       OK
+          5.00 ns ± 744 ps,  15 B  allocated,   0 B  copied,  35 MB peak memory
+        child-last:         OK
+          5.03 ns ± 864 ps,  15 B  allocated,   0 B  copied,  35 MB peak memory
+        siblings:           OK
+          4.15 μs ± 150 ns,  21 KB allocated,   1 B  copied,  35 MB peak memory
+        offset-first:       OK
+          78.9 ns ± 672 ps, 436 B  allocated,   0 B  copied,  35 MB peak memory
+        offset-last:        OK
+          77.9 ns ± 2.1 ns, 435 B  allocated,   0 B  copied,  35 MB peak memory
+        cover-last:         OK
+          42.7 ns ± 1.4 ns, 238 B  allocated,   0 B  copied,  35 MB peak memory
+        replace-first:      OK
+          163  ns ±  10 ns, 1.8 KB allocated,   0 B  copied,  35 MB peak memory
+        replace-middle:     OK
+          160  ns ±  14 ns, 1.9 KB allocated,   0 B  copied,  35 MB peak memory
+        replace-last:       OK
+          181  ns ± 7.8 ns, 1.9 KB allocated,   0 B  copied,  35 MB peak memory
+        splice-middle:      OK
+          201  ns ±  11 ns, 1.7 KB allocated,   0 B  copied,  35 MB peak memory
+        typed-first:        OK
+          72.2 ns ± 2.6 ns, 414 B  allocated,   0 B  copied,  35 MB peak memory
+        typed-last:         OK
+          4.37 μs ± 122 ns,  23 KB allocated,   1 B  copied,  35 MB peak memory
+        typed-all:          OK
+          5.30 μs ± 667 ns,  30 KB allocated,   1 B  copied,  35 MB peak memory
+    1000
+      construct
+        direct:             OK
+          23.9 μs ± 2.3 μs, 140 KB allocated, 132 B  copied,  39 MB peak memory
+        builder-tokens:     OK
+          12.4 μs ± 362 ns,  84 KB allocated,  89 B  copied,  42 MB peak memory
+        builder-monad:      OK
+          12.9 μs ± 290 ns,  86 KB allocated,  87 B  copied,  42 MB peak memory
+      prepared
+        render:             OK
+          4.43 μs ± 437 ns, 6.6 KB allocated,   0 B  copied,  73 MB peak memory
+        builder-reuse:      OK
+          18.2 μs ± 443 ns,  93 KB allocated,  33 B  copied,  73 MB peak memory
+        builder-checkpoint: OK
+          17.9 μs ± 498 ns,  93 KB allocated,  33 B  copied,  73 MB peak memory
+        child-first:        OK
+          2.76 ns ±  82 ps,  15 B  allocated,   0 B  copied,  73 MB peak memory
+        child-middle:       OK
+          4.35 ns ±  30 ps,  15 B  allocated,   0 B  copied,  73 MB peak memory
+        child-last:         OK
+          4.34 ns ± 102 ps,  15 B  allocated,   0 B  copied,  73 MB peak memory
+        siblings:           OK
+          42.5 μs ± 4.1 μs, 211 KB allocated,  11 B  copied,  73 MB peak memory
+        offset-first:       OK
+          76.2 ns ± 2.3 ns, 436 B  allocated,   0 B  copied,  73 MB peak memory
+        offset-last:        OK
+          76.1 ns ± 2.1 ns, 436 B  allocated,   0 B  copied,  73 MB peak memory
+        cover-last:         OK
+          43.8 ns ± 3.4 ns, 238 B  allocated,   0 B  copied,  73 MB peak memory
+        replace-first:      OK
+          1.48 μs ±  74 ns,  16 KB allocated,   0 B  copied,  73 MB peak memory
+        replace-middle:     OK
+          1.57 μs ± 109 ns,  16 KB allocated,   0 B  copied,  73 MB peak memory
+        replace-last:       OK
+          1.65 μs ± 137 ns,  16 KB allocated,   0 B  copied,  73 MB peak memory
+        splice-middle:      OK
+          1.59 μs ±  34 ns,  16 KB allocated,   0 B  copied,  73 MB peak memory
+        typed-first:        OK
+          62.0 ns ± 1.1 ns, 414 B  allocated,   0 B  copied,  73 MB peak memory
+        typed-last:         OK
+          37.6 μs ± 576 ns, 226 KB allocated,  11 B  copied,  73 MB peak memory
+        typed-all:          OK
+          50.8 μs ± 2.6 μs, 297 KB allocated,  15 B  copied,  73 MB peak memory
+    10000
+      construct
+        direct:             OK
+          273  μs ± 6.8 μs, 1.4 MB allocated,  12 KB copied,  73 MB peak memory
+        builder-tokens:     OK
+          158  μs ± 5.7 μs, 846 KB allocated, 7.5 KB copied,  73 MB peak memory
+        builder-monad:      OK
+          168  μs ± 7.9 μs, 854 KB allocated, 7.9 KB copied,  73 MB peak memory
+      prepared
+        render:             OK
+          44.9 μs ± 1.2 μs,  75 KB allocated,   3 B  copied,  75 MB peak memory
+        builder-reuse:      OK
+          200  μs ± 6.8 μs, 936 KB allocated, 2.9 KB copied,  75 MB peak memory
+        builder-checkpoint: OK
+          204  μs ± 7.3 μs, 935 KB allocated, 2.9 KB copied,  75 MB peak memory
+        child-first:        OK
+          2.87 ns ± 930 ps,  15 B  allocated,   0 B  copied,  75 MB peak memory
+        child-middle:       OK
+          4.26 ns ± 300 ps,  15 B  allocated,   0 B  copied,  75 MB peak memory
+        child-last:         OK
+          4.32 ns ± 142 ps,  15 B  allocated,   0 B  copied,  75 MB peak memory
+        siblings:           OK
+          403  μs ± 5.5 μs, 2.0 MB allocated, 100 B  copied,  75 MB peak memory
+        offset-first:       OK
+          75.0 ns ± 2.5 ns, 436 B  allocated,   0 B  copied,  75 MB peak memory
+        offset-last:        OK
+          72.1 ns ± 1.3 ns, 438 B  allocated,   0 B  copied,  75 MB peak memory
+        cover-last:         OK
+          44.4 ns ± 1.6 ns, 238 B  allocated,   0 B  copied,  75 MB peak memory
+        replace-first:      OK
+          13.0 μs ± 192 ns, 157 KB allocated,   7 B  copied,  76 MB peak memory
+        replace-middle:     OK
+          15.6 μs ± 4.1 μs, 157 KB allocated,   6 B  copied,  76 MB peak memory
+        replace-last:       OK
+          14.7 μs ± 313 ns, 157 KB allocated,   6 B  copied,  76 MB peak memory
+        splice-middle:      OK
+          18.0 μs ± 451 ns, 156 KB allocated,   7 B  copied,  76 MB peak memory
+        typed-first:        OK
+          68.4 ns ± 3.1 ns, 415 B  allocated,   0 B  copied,  76 MB peak memory
+        typed-last:         OK
+          435  μs ±  47 μs, 2.2 MB allocated, 104 B  copied,  76 MB peak memory
+        typed-all:          OK
+          536  μs ±  18 μs, 2.8 MB allocated, 146 B  copied,  76 MB peak memory
+  deep
+    100
+      construct:            OK
+        1.90 μs ±  65 ns,  12 KB allocated,   2 B  copied,  76 MB peak memory
+      prepared
+        render:             OK
+          453  ns ± 193 ns,  44 B  allocated,   0 B  copied,  76 MB peak memory
+        descend:            OK
+          3.29 μs ± 118 ns,  18 KB allocated,   2 B  copied,  76 MB peak memory
+        replace-path:       OK
+          4.51 μs ± 129 ns,  27 KB allocated,   1 B  copied,  76 MB peak memory
+        offset:             OK
+          4.96 μs ± 616 ns,  24 KB allocated,   9 B  copied,  76 MB peak memory
+        focus-and-replace:  OK
+          5.20 μs ± 715 ns,  28 KB allocated,   4 B  copied,  76 MB peak memory
+      focused
+        replace:            OK
+          1.78 μs ±  91 ns,  10 KB allocated,   2 B  copied,  76 MB peak memory
+        root:               OK
+          149  ns ± 8.9 ns,  71 B  allocated,   0 B  copied,  76 MB peak memory
+    1000
+      construct:            OK
+        20.6 μs ± 690 ns, 124 KB allocated, 201 B  copied,  76 MB peak memory
+      prepared
+        render:             OK
+          6.30 μs ± 223 ns,   0 B  allocated,   0 B  copied,  76 MB peak memory
+        descend:            OK
+          34.8 μs ± 1.3 μs, 180 KB allocated, 142 B  copied,  76 MB peak memory
+        replace-path:       OK
+          67.1 μs ± 1.5 μs, 366 KB allocated, 292 B  copied,  76 MB peak memory
+        offset:             OK
+          47.9 μs ± 1.4 μs, 240 KB allocated, 859 B  copied,  76 MB peak memory
+        focus-and-replace:  OK
+          51.2 μs ± 1.4 μs, 276 KB allocated, 370 B  copied,  76 MB peak memory
+      focused
+        replace:            OK
+          19.4 μs ± 1.9 μs, 102 KB allocated, 165 B  copied,  76 MB peak memory
+        root:               OK
+          2.27 μs ±  34 ns,   0 B  allocated,   0 B  copied,  76 MB peak memory
+    10000
+      construct:            OK
+        206  μs ±  10 μs, 1.2 MB allocated,  19 KB copied,  76 MB peak memory
+      prepared
+        render:             OK
+          44.4 μs ± 1.4 μs,   0 B  allocated,   0 B  copied,  76 MB peak memory
+        descend:            OK
+          347  μs ± 7.9 μs, 1.7 MB allocated,  11 KB copied,  76 MB peak memory
+        replace-path:       OK
+          873  μs ±  11 μs, 4.0 MB allocated,  39 KB copied,  76 MB peak memory
+        offset:             OK
+          758  μs ±  79 μs, 2.8 MB allocated,  82 KB copied,  76 MB peak memory
+        focus-and-replace:  OK
+          642  μs ±  48 μs, 2.7 MB allocated,  35 KB copied,  76 MB peak memory
+      focused
+        replace:            OK
+          192  μs ± 2.1 μs, 1.0 MB allocated,  16 KB copied,  76 MB peak memory
+        root:               OK
+          24.8 μs ± 4.0 μs,   0 B  allocated,   0 B  copied,  76 MB peak memory
+  chain
+    100
+      tokens:               OK
+        18.5 μs ± 543 ns, 106 KB allocated,  38 B  copied,  76 MB peak memory
+      descendants:          OK
+        17.8 μs ± 411 ns, 106 KB allocated,  38 B  copied,  76 MB peak memory
+      offset-first:         OK
+        5.55 μs ± 112 ns,  30 KB allocated,  13 B  copied,  76 MB peak memory
+      offset-last:          OK
+        78.6 ns ± 6.3 ns, 436 B  allocated,   0 B  copied,  76 MB peak memory
+    1000
+      tokens:               OK
+        194  μs ± 2.9 μs, 1.0 MB allocated, 3.4 KB copied,  76 MB peak memory
+      descendants:          OK
+        192  μs ± 2.3 μs, 1.0 MB allocated, 3.3 KB copied,  76 MB peak memory
+      offset-first:         OK
+        51.1 μs ± 1.4 μs, 296 KB allocated, 1.3 KB copied,  76 MB peak memory
+      offset-last:          OK
+        76.1 ns ± 4.4 ns, 436 B  allocated,   0 B  copied,  76 MB peak memory
+    10000
+      tokens:               OK
+        2.33 ms ± 124 μs,  10 MB allocated, 332 KB copied,  76 MB peak memory
+      descendants:          OK
+        2.22 ms ±  31 μs,  10 MB allocated, 332 KB copied,  76 MB peak memory
+      offset-first:         OK
+        778  μs ±  23 μs, 3.3 MB allocated, 112 KB copied,  76 MB peak memory
+      offset-last:          OK
+        80.9 ns ± 2.5 ns, 435 B  allocated,   0 B  copied,  76 MB peak memory
+  document-1000
+    construct:              OK
+      183  μs ± 2.4 μs, 1.0 MB allocated, 6.8 KB copied,  76 MB peak memory
+    render:                 OK
+      26.5 μs ± 205 ns,  22 KB allocated,   0 B  copied,  81 MB peak memory
+    tokens:                 OK
+      362  μs ±  11 μs, 2.0 MB allocated,  93 B  copied,  81 MB peak memory
+    typed-first-group:      OK
+      49.0 ns ± 854 ps, 316 B  allocated,   0 B  copied,  81 MB peak memory
+    typed-all-groups:       OK
+      53.5 μs ± 3.6 μs, 297 KB allocated,  11 B  copied,  81 MB peak memory
+    100-edits-latest:       OK
+      103  μs ± 3.7 μs, 877 KB allocated,  35 B  copied,  81 MB peak memory
+    100-edits-history:      OK
+      92.2 μs ± 1.9 μs, 892 KB allocated,  36 B  copied,  81 MB peak memory
+
+All 107 tests passed (143.64s)

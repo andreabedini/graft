@@ -15,3 +15,5 @@ Initial release.
   as a pure value or in the `Build` monad.
 * Typed AST views over cursors.
 * A line index for line, column and UTF-16 positions.
+* `NFData`, `Hashable` and `Exception` instances, and `Functor` over kinds for
+  green trees. `Show` prints the calls that rebuild abstract values.
