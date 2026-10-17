@@ -4,7 +4,7 @@
 -- Workloads and observations shared by timing and residency runs.
 module Fixtures
   ( Kind (..), Prepared (..), PreparedCursor (..), Named (..), Numbered (..), Grouped (..)
-  , wideSource, wideTree, deepTree, documentTree, documentSource
+  , wideSource, wideTree, deepTree, chainTree, chainSource, documentTree, documentSource
   , forceElement, checked, selected, cached, cursorEnd, siblingSum
   , buildTokens, buildReuse, buildCheckpoint, editMany, snapshots
   , checkFixtures
@@ -72,6 +72,18 @@ wideElements (text : rest) = Token (greenToken Name text) : wideElements rest
 deepTree :: Int -> GreenNode Kind
 deepTree depth = List.foldl' (\node _ -> greenNode Group [Node node]) leaf [1 .. depth]
   where leaf = greenNode Group [Token (greenToken Number "001")]
+
+-- A left-nested operator chain such as @((0 + 1) + 2) + 3@: both deep and
+-- wide, so whole-tree traversals pay for every level on every token.
+chainTree :: Int -> GreenNode Kind
+chainTree count = List.foldl' step leaf [1 .. count]
+  where
+    leaf = greenNode Group [Token (greenToken Number "0")]
+    step left index = greenNode Group
+      [Node left, Token (greenToken Trivia " + "), Token (greenToken Number (Text.pack (show index)))]
+
+chainSource :: Int -> Text
+chainSource count = Text.concat ("0" : [Text.pack (" + " ++ show index) | index <- [1 .. count]])
 
 lineText :: Int -> [Text]
 lineText index = [Text.pack ("名" ++ show index), "  = ", "001", " -- keep", "\r\n"]
@@ -148,6 +160,7 @@ checkFixtures :: IO ()
 checkFixtures = do
   mapM_ checkWide [100, 1000, 10000]
   mapM_ checkDeep [100, 1000, 10000]
+  mapM_ checkChain [100, 1000, 10000]
   let document = Node (documentTree 1000)
       before = documentSource 1000
       path = [499, 2]
@@ -183,6 +196,15 @@ checkFixtures = do
       assert "typed last token" (cursorEnd (tokenSyntax (selected (astToken root :: Maybe Numbered))) == nodeTextLength node)
       assert "splice exact source" (renderNode inserted == Text.concat
         [Text.concat (take (count `div` 2) texts), "NEW", Text.concat (drop (count `div` 2) texts)])
+    checkChain count = do
+      let node = chainTree count
+          root = rootCursor (Node node)
+      _ <- evaluate (forceElement (Node node))
+      assert "chain source" (renderNode node == chainSource count)
+      assert "chain tokens" (length (cursorTokens root) == 2 * count + 1)
+      assert "chain first offset" (fmap cursorEnd (singleToken (tokenAtOffset 0 root)) == Just 1)
+    singleToken (SingleToken cursor) = Just cursor
+    singleToken _ = Nothing
     checkDeep depth = do
       let node = deepTree depth
           root = rootCursor (Node node)

@@ -1,3 +1,5 @@
+{-# LANGUAGE BangPatterns #-}
+
 -- | An immutable red-tree zipper over green elements. A cursor denotes an
 -- occurrence in one tree snapshot, with parents, siblings and absolute offsets.
 -- Navigation does not edit or rebuild green nodes. No pointer identity is exposed.
@@ -106,9 +108,9 @@ cursorChildAt index (Cursor green offset above)
       Node node -> go node index offset [] (nodeChildren node)
   where
     go _ _ _ _ [] = Left (ChildIndexOutOfBounds index)
-    go node 0 start before (child : after) =
+    go node 0 !start before (child : after) =
       Right (Cursor child start (Just (Crumb node offset above index before after)))
-    go node remaining start before (child : after) =
+    go node !remaining !start before (child : after) =
       go node (remaining - 1) (start + elementTextLength child) (child : before) after
 
 -- | First immediate child, including tokens and zero-length elements.
@@ -146,7 +148,9 @@ cursorAncestors = unfold cursorParent . Just
 -- | Preorder traversal including the focus, every node, and every token.
 -- Shared green values are visited once per occurrence. Results are lazy.
 cursorDescendants :: Cursor kind -> [Cursor kind]
-cursorDescendants cursor = cursor : concatMap cursorDescendants (cursorChildren cursor)
+cursorDescendants cursor = go cursor []
+  where
+    go current rest = current : foldr go rest (cursorChildren current)
 
 -- | All token occurrences in this subtree in source order, including empty
 -- tokens and trivia. Does not include tokens outside the focus.
@@ -193,9 +197,9 @@ data TokenAtOffset a = NoToken | SingleToken a | BetweenTokens a a
 -- select the first and last nonempty token; a shared boundary selects both.
 -- Empty tokens are ignored. An offset outside the focus returns 'NoToken'.
 -- Offsets inside multibyte characters are accepted. Unrelated subtrees are
--- pruned using their cached ranges; relevant child lists are scanned.
+-- pruned using their cached ranges, and the search stops after two tokens.
 tokenAtOffset :: TextLength -> Cursor kind -> TokenAtOffset (Cursor kind)
-tokenAtOffset offset cursor = case matching cursor of
+tokenAtOffset offset cursor = case take 2 (matching cursor) of
   [] -> NoToken
   [token] -> SingleToken token
   left : right : _ -> BetweenTokens left right
@@ -204,9 +208,10 @@ tokenAtOffset offset cursor = case matching cursor of
       | rangeIsEmpty range || offset < rangeStart range || offset > rangeEnd range = []
       | otherwise = case cursorGreen current of
           Token _ -> [current]
-          Node _ -> concatMap matching (cursorChildren current)
+          Node _ -> concatMap matching (takeWhile startsBefore (cursorChildren current))
       where
         range = cursorRange current
+    startsBefore child = rangeStart (cursorRange child) <= offset
 
 -- | Descend repeatedly into the first child whose range contains the query.
 -- Returns the innermost element along that branch, or 'Nothing' if the query

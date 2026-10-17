@@ -24,6 +24,7 @@ main = do
       [ bgroup "token" [tokenBench bytes | bytes <- [32, 4096]]
       , bgroup "wide" (map wideBench [100, 1000, 10000])
       , bgroup "deep" (map deepBench [100, 1000, 10000])
+      , bgroup "chain" (map chainBench [100, 1000, 10000])
       , documentBench
       ]
 
@@ -56,6 +57,7 @@ wideBench size = bgroup (show size)
         , bench "child-middle" $ whnf (endAt (size `div` 2)) tree
         , bench "child-last" $ whnf (endAt (size - 1)) tree
         , bench "siblings" $ whnf (siblingSum . rootCursor) tree
+        , bench "offset-first" $ whnf (offsetEnd 1 . rootCursor) tree
         , bench "offset-last" $ whnf (offsetEnd (nodeTextLength node - 1) . rootCursor) tree
         , bench "cover-last" $ whnf (cursorEnd . selected . coveringElement
             (rangeFromLength (nodeTextLength node - 1) 1) . rootCursor) tree
@@ -95,6 +97,17 @@ deepBench depth = bgroup (show depth)
       , bench "root" $ whnf (cursorEnd . cursorRoot) (preparedCursor prepared)
       ]
   ]
+
+chainBench :: Int -> Benchmark
+chainBench count = env (pure (Prepared (Node (chainTree count)))) $ \prepared ->
+  let tree = preparedTree prepared
+      end = elementTextLength tree
+  in bgroup (show count)
+    [ bench "tokens" $ whnf (List.foldl' (\total cursor -> total + cursorEnd cursor) 0 . cursorTokens . rootCursor) tree
+    , bench "descendants" $ whnf (length . cursorDescendants . rootCursor) tree
+    , bench "offset-first" $ whnf (offsetEnd 1 . rootCursor) tree
+    , bench "offset-last" $ whnf (offsetEnd (end - 1) . rootCursor) tree
+    ]
 
 documentBench :: Benchmark
 documentBench = env (pure (Prepared (Node (documentTree 1000)))) $ \prepared ->
