@@ -16,6 +16,7 @@ module Graft.Edit
 
 import Data.Bifunctor (first)
 import Graft.Green
+import Graft.Green.Internal (childAt, childCount, setChild, spliceChildrenUnchecked)
 
 -- | Zero-based child indices, counting both nodes and tokens. The empty path
 -- denotes the root. Paths belong to a particular tree version; an edit may
@@ -31,31 +32,26 @@ data PathError
   | CannotDescendIntoToken
   deriving (Eq, Show)
 
--- | Look up a subtree or token. Takes time proportional to the sum of the
--- child indices along the path, plus path depth.
+-- | Look up a subtree or token. Takes time proportional to path depth.
 elementAt :: Path -> GreenElement kind -> Either PathError (GreenElement kind)
 elementAt [] root = Right root
 elementAt (index : rest) root
   | index < 0 = Left (NegativeChildIndex index)
   | otherwise = case root of
       Token _ -> Left CannotDescendIntoToken
-      Node node -> do
-        child <- childAt index (nodeChildren node)
-        elementAt rest child
-  where
-    childAt _ [] = Left (ChildIndexOutOfBounds index)
-    childAt 0 (child : _) = Right child
-    childAt n (_ : children) = childAt (n - 1) children
+      Node node
+        | index >= childCount node -> Left (ChildIndexOutOfBounds index)
+        | otherwise -> elementAt rest (childAt node index)
 
 -- | @replaceAt path replacement root@ replaces the selected element.
 -- An empty path replaces the whole root. Replacement may change kind or switch
 -- between node and token; grammar validation is the caller's responsibility.
 --
--- Only ancestor nodes and child-list prefixes on the path are rebuilt. Sibling
--- elements and list suffixes are reused; the original root remains usable.
--- Ancestor lengths are recomputed from immediate children's cached lengths.
--- Cost is proportional to the sum of ancestor child counts plus path depth;
--- replacement text and untouched descendants are not traversed.
+-- Only ancestor nodes on the path are rebuilt, each by copying its child
+-- array; sibling elements are reused and the original root remains usable.
+-- Ancestor lengths are adjusted by the change in the replaced child's length.
+-- Cost is proportional to the sum of ancestor child counts; replacement text
+-- and untouched descendants are not traversed.
 replaceAt :: Path -> GreenElement kind -> GreenElement kind -> Either PathError (GreenElement kind)
 replaceAt [] replacement _ = Right replacement
 replaceAt (index : rest) replacement root
@@ -91,6 +87,7 @@ data ChildEditError
 -- Untouched elements and the following list suffix are reused. Cost is a
 -- traversal of immediate children and replacements to establish the new cache;
 -- descendant text is not traversed. Inputs must be finite, as for 'greenNode'.
+-- Offsets of the following children are shifted rather than recomputed.
 spliceChildren
   :: Int -> Int -> [GreenElement kind] -> GreenNode kind
   -> Either ChildEditError (GreenNode kind)
@@ -98,14 +95,9 @@ spliceChildren start end replacements node
   | start < 0 = Left (NegativeChildBoundary start)
   | end < 0 = Left (NegativeChildBoundary end)
   | end < start = Left (ReversedChildRange start end)
-  | otherwise = greenNode (nodeKind node) <$> go start (nodeChildren node)
-  where
-    go 0 items = (replacements ++) <$> dropSelected (end - start) items
-    go _ [] = Left (ChildBoundaryOutOfBounds start)
-    go remaining (item : items) = (item :) <$> go (remaining - 1) items
-    dropSelected 0 items = Right items
-    dropSelected _ [] = Left (ChildBoundaryOutOfBounds end)
-    dropSelected remaining (_ : items) = dropSelected (remaining - 1) items
+  | start > childCount node = Left (ChildBoundaryOutOfBounds start)
+  | end > childCount node = Left (ChildBoundaryOutOfBounds end)
+  | otherwise = Right (spliceChildrenUnchecked start end replacements node)
 
 -- | Insert one immediate child before the given index. The child count is a
 -- valid position and appends; zero inserts into an empty node. Uses the same
@@ -123,11 +115,8 @@ insertChild index element = spliceChildren index index [element]
 removeChild :: Int -> GreenNode kind -> Either ChildEditError (GreenNode kind)
 removeChild index node
   | index < 0 = Left (NegativeChildBoundary index)
-  | otherwise = greenNode (nodeKind node) <$> go index (nodeChildren node)
-  where
-    go _ [] = Left (ChildBoundaryOutOfBounds index)
-    go 0 (_ : items) = Right items
-    go remaining (item : items) = (item :) <$> go (remaining - 1) items
+  | index >= childCount node = Left (ChildBoundaryOutOfBounds index)
+  | otherwise = Right (spliceChildrenUnchecked index (index + 1) [] node)
 
 -- | Splice the children of the node selected by a root-relative path and
 -- return a new root. An empty path selects the root node. Path validation
@@ -172,8 +161,5 @@ modifyChild
   -> Either PathError (GreenNode kind)
 modifyChild index edit node
   | index < 0 = Left (NegativeChildIndex index)
-  | otherwise = greenNode (nodeKind node) <$> go index (nodeChildren node)
-  where
-    go _ [] = Left (ChildIndexOutOfBounds index)
-    go 0 (child : children) = (: children) <$> edit child
-    go n (child : children) = (child :) <$> go (n - 1) children
+  | index >= childCount node = Left (ChildIndexOutOfBounds index)
+  | otherwise = (\child -> setChild index child node) <$> edit (childAt node index)

@@ -35,9 +35,10 @@ common warnings
 
 library
     import:           warnings
-    exposed-modules:  Graft Graft.Green Graft.Edit Graft.Range Graft.Cursor Graft.Builder Graft.Ast
+    exposed-modules:  Graft Graft.Green Graft.Green.Internal Graft.Edit Graft.Range Graft.Cursor Graft.Builder Graft.Ast
     build-depends:
         base >=4.18 && <4.22,
+        primitive >=0.8 && <0.10,
         text >=2.0 && <2.2
     hs-source-dirs:   src
     default-language: Haskell2010

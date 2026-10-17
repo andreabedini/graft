@@ -14,6 +14,8 @@ module Graft.Green
   , tokenKind
   , elementKind
   , nodeChildren
+  , nodeChildCount
+  , nodeChildAt
   , tokenText
   , nodeTextLength
   , tokenTextLength
@@ -23,50 +25,17 @@ module Graft.Green
   , renderElement
   ) where
 
-import qualified Data.Foldable as Foldable
+import Control.Monad.ST (runST)
+import Data.Foldable (toList)
 import Data.Text (Text)
-import qualified Data.Text.Foreign as Text
-import qualified Data.Text.Lazy as Lazy
-import qualified Data.Text.Lazy.Builder as Builder
-
--- | A non-negative count of UTF-8 bytes, including all trivia, in the same
--- 'Int' unit that "Data.Text" and "Data.ByteString" use for lengths. This is
--- neither a character count nor a UTF-16 code-unit count. Shared subtrees make
--- a logical length exceed the physical text size; sums are not checked for
--- overflow, which needs a logical length beyond @maxBound :: Int@.
-type TextLength = Int
-
--- | An internal node with ordered children and a cached total text length.
--- Equality is structural, including kinds, rather than pointer identity.
-data GreenNode kind = GreenNode !kind !TextLength [GreenElement kind]
-  deriving (Eq, Show)
-
--- | A leaf containing exact Unicode text and its cached UTF-8 byte length.
--- Empty text is allowed. No normalization is performed.
-data GreenToken kind = GreenToken !kind !TextLength !Text
-  deriving (Eq, Show)
-
--- | A node or token. Both can occur as children of a node.
-data GreenElement kind
-  = Node !(GreenNode kind)
-  | Token !(GreenToken kind)
-  deriving (Eq, Show)
-
--- | Construct a node, summing the cached lengths of its immediate children.
--- Takes time proportional to the number of children, without rendering them.
--- An empty child list is allowed; the supplied child values are reused.
-greenNode :: kind -> [GreenElement kind] -> GreenNode kind
-greenNode kind children =
-  GreenNode kind (Foldable.foldl' (\n child -> n + elementTextLength child) 0 children) children
-
--- | Construct a token. 'Text' stores UTF-8 internally, so reading the byte
--- length takes constant time and copies nothing.
-greenToken :: kind -> Text -> GreenToken kind
-greenToken kind text = GreenToken kind (Text.lengthWord8 text) text
+import qualified Data.Text as Text
+import qualified Data.Text.Array as Array
+import Data.Text.Internal (Text (..))
+import Graft.Green.Internal
 
 -- | The caller-defined kind of a node.
 nodeKind :: GreenNode kind -> kind
-nodeKind (GreenNode kind _ _) = kind
+nodeKind (GreenNode kind _ _ _) = kind
 
 -- | The caller-defined kind of a token.
 tokenKind :: GreenToken kind -> kind
@@ -77,9 +46,20 @@ elementKind :: GreenElement kind -> kind
 elementKind (Node node) = nodeKind node
 elementKind (Token token) = tokenKind token
 
--- | Immediate children in source order, including trivia tokens.
+-- | Immediate children in source order, including trivia tokens. The list is
+-- produced lazily from the node's array of children.
 nodeChildren :: GreenNode kind -> [GreenElement kind]
-nodeChildren (GreenNode _ _ children) = children
+nodeChildren (GreenNode _ _ children _) = toList children
+
+-- | Number of immediate children, in constant time.
+nodeChildCount :: GreenNode kind -> Int
+nodeChildCount = childCount
+
+-- | The immediate child at a zero-based index, in constant time.
+nodeChildAt :: Int -> GreenNode kind -> Maybe (GreenElement kind)
+nodeChildAt index node
+  | index < 0 || index >= childCount node = Nothing
+  | otherwise = Just (childAt node index)
 
 -- | Exact token text, including whatever trivia the caller supplied.
 tokenText :: GreenToken kind -> Text
@@ -87,20 +67,16 @@ tokenText (GreenToken _ _ text) = text
 
 -- | Read a node's cached UTF-8 byte length without traversing its children.
 nodeTextLength :: GreenNode kind -> TextLength
-nodeTextLength (GreenNode _ len _) = len
+nodeTextLength (GreenNode _ len _ _) = len
 
 -- | Read a token's cached UTF-8 byte length without traversing its text.
 tokenTextLength :: GreenToken kind -> TextLength
 tokenTextLength (GreenToken _ len _) = len
 
--- | Read the cached UTF-8 byte length of either element.
-elementTextLength :: GreenElement kind -> TextLength
-elementTextLength (Node node) = nodeTextLength node
-elementTextLength (Token token) = tokenTextLength token
-
--- | Concatenate token text in source order, preserving it exactly.
--- Uses a text builder, avoiding repeated strict-text concatenation.
--- Output must fit in a strict 'Text'; extremely deep trees may exhaust the stack.
+-- | Concatenate token text in source order, preserving it exactly. The
+-- cached length sizes the result, so the text is copied once into a single
+-- allocation. Output must fit in a strict 'Text'; shared subtrees count once
+-- per occurrence. Extremely deep trees may exhaust the stack.
 renderNode :: GreenNode kind -> Text
 renderNode = renderElement . Node
 
@@ -110,7 +86,23 @@ renderToken = tokenText
 
 -- | Render either element losslessly. See 'renderNode' for limits.
 renderElement :: GreenElement kind -> Text
-renderElement = Lazy.toStrict . Builder.toLazyText . build
+renderElement (Token token) = tokenText token
+renderElement element
+  | total == 0 = Text.empty
+  | otherwise = runST $ do
+      target <- Array.new total
+      let write offset (Token (GreenToken _ len (Text source start _))) =
+            Array.copyI len target offset source start
+          write offset (Node node) = go 0
+            where
+              count = childCount node
+              go index
+                | index == count = pure ()
+                | otherwise = do
+                    write (offset + childStart node index) (childAt node index)
+                    go (index + 1)
+      write 0 element
+      result <- Array.unsafeFreeze target
+      pure (Text result 0 total)
   where
-    build (Token token) = Builder.fromText (tokenText token)
-    build (Node node) = foldMap build (nodeChildren node)
+    total = elementTextLength element

@@ -1,3 +1,5 @@
+{-# LANGUAGE BangPatterns #-}
+
 -- | Pure, persistent Rowan-style construction and retroactive wrapping.
 -- Lexing and parsing remain the caller's responsibility. Trivia is supplied
 -- as ordinary token text; construction performs no grammar validation.
@@ -17,6 +19,7 @@ module Graft.Builder
 
 import Data.Text (Text)
 import Graft.Green
+import Graft.Green.Internal (greenNodeReversed)
 
 -- | A pending forest in reverse source order, its cached element count, and
 -- a stack of open node kinds and starting positions. Constructors are hidden.
@@ -65,7 +68,7 @@ emitToken kind text = emitElement (Token (greenToken kind text))
 -- cached length without rendering or traversing descendants. This can seed
 -- syntax-preserving construction with untouched subtrees.
 emitElement :: GreenElement kind -> Builder kind -> Builder kind
-emitElement element (Builder count pending parents) =
+emitElement !element (Builder count pending parents) =
   Builder (count + 1) (element : pending) parents
 
 -- | Close the innermost open node. All pending elements from its starting
@@ -75,8 +78,9 @@ emitElement element (Builder count pending parents) =
 finishNode :: Builder kind -> Either BuilderError (Builder kind)
 finishNode (Builder _ _ []) = Left NoOpenNode
 finishNode (Builder count pending ((kind, start) : parents)) =
-  let (reversedChildren, before) = splitAt (count - start) pending
-      node = greenNode kind (reverse reversedChildren)
+  let size = count - start
+      (reversedChildren, before) = splitAt size pending
+      !node = greenNodeReversed kind size reversedChildren
   in Right (Builder (start + 1) (Node node : before) parents)
 
 -- | Mark the end of the pending forest in constant time. The marker can be
