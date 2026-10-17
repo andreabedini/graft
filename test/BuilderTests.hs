@@ -9,6 +9,7 @@ import qualified Data.Text as Text
 import Graft.Builder
 import Graft.Green
 import Test.QuickCheck
+import TestModel (hugeDepth)
 
 -- An independent source-ordered tree, with no caches or builder positions.
 data Tree = Branch Int [Tree] | Leaf Int String
@@ -221,7 +222,7 @@ regressions = once $ conjoin
       emptyNode <- finishNode opened
       startNodeAt (checkpoint emptyBuilder) 7 emptyNode >>= finishNode >>= runBuilder)
   , conjoin
-      [ nodeTextLength hugeRoot === 2 ^ (40 :: Int)
+      [ nodeTextLength hugeRoot === 2 ^ hugeDepth
       , nodeKind hugeRoot === 9
       , length (nodeChildren hugeRoot) === 1
       ]
@@ -232,7 +233,7 @@ regressions = once $ conjoin
     -- Reuse cached huge lengths without rendering or comparing the shared DAG.
     huge :: GreenElement Int
     huge = iterate (\element -> Node (greenNode 8 [element, element]))
-      (Token (greenToken 1 "x")) !! 40
+      (Token (greenToken 1 "x")) !! hugeDepth
     hugeRoot = case finishNode (emitElement huge (startNode 9 emptyBuilder)) >>= runBuilder of
       Right node -> node
       Left err -> error (show err)

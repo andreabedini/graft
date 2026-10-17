@@ -1,8 +1,9 @@
 module TestModel
   ( Kind (..), Model (..), scalar, genChar, genText, genKind, genModel
-  , compile, source, byteLength, validCaches, contexts
+  , compile, source, byteLength, validCaches, contexts, hugeDepth
   ) where
 
+import Data.Bits (finiteBitSize)
 import Data.Char (chr, ord)
 import qualified Data.Text as Text
 import Graft.Edit (Path)
@@ -66,6 +67,11 @@ byteLength = sum . map width
       | ord c <= 0x7FF = 2
       | ord c <= 0xFFFF = 3
       | otherwise = 4
+
+-- Depth of the shared regression DAGs: their logical length 2 ^ hugeDepth
+-- exceeds any real text but stays below maxBound on 32- and 64-bit Int.
+hugeDepth :: Int
+hugeDepth = finiteBitSize (0 :: Int) - 24
 
 validCaches :: GreenElement Kind -> Bool
 validCaches tree = elementTextLength tree == byteLength (Text.unpack (renderElement tree))

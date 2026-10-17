@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 
--- Run with: cabal exec -- runghc -package=graft examples/ExactUpdate.hs
+-- Run with: cabal run graft-example
 -- The tree is supplied by an application, without a lexer or parser in Graft.
 module Main (main) where
 

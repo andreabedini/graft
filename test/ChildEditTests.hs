@@ -224,10 +224,10 @@ regressions = once $ conjoin
   , spliceChildren maxBound maxBound [] empty === Left (ChildBoundaryOutOfBounds maxBound)
   , spliceChildren minBound maxBound [] empty === Left (NegativeChildBoundary minBound)
   , conjoin
-      [ elementTextLength hugeEdited === 2 ^ (40 :: Int) + 1
+      [ elementTextLength hugeEdited === 2 ^ hugeDepth + 1
       , case cursorAt [1] (rootCursor hugeEdited) of
           Left err -> counterexample (show err) False
-          Right focus -> cursorRange focus === rangeFromLength (2 ^ (40 :: Int)) 1
+          Right focus -> cursorRange focus === rangeFromLength (2 ^ hugeDepth) 1
       ]
   , case insertChild 0 (Node empty) (greenNode Root [tok "x"]) of
       Left err -> counterexample (show err) False
@@ -239,7 +239,7 @@ regressions = once $ conjoin
     empty = greenNode Group []
     tok = Token . greenToken Name
     original = greenNode Group [tok "λ", tok "\t", tok "\r\n-- keep\0"]
-    huge = iterate (\element -> Node (greenNode Group [element, element])) (tok "x") !! 40
+    huge = iterate (\element -> Node (greenNode Group [element, element])) (tok "x") !! hugeDepth
     hugeEdited = case insertChild 1 (tok "z") (greenNode Root [huge]) of
       Right node -> Node node
       Left err -> error (show err)

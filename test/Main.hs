@@ -403,9 +403,9 @@ cursorRegressions = once $ conjoin
   , cursorGreen sharedSecond === shared
   , renderElement (cursorTree (replaceFocus (tok "long") sharedSecond)) === "along"
   , cursorRange sharedSecond === rangeFromLength 1 1
-  , rangeEnd (cursorRange hugeCursor) === 2 ^ (40 :: Int)
-  , offsetPaths (tokenAtOffset (2 ^ (40 :: Int)) hugeCursor)
-      === SingleToken (replicate 40 1)
+  , rangeEnd (cursorRange hugeCursor) === 2 ^ hugeDepth
+  , offsetPaths (tokenAtOffset (2 ^ hugeDepth) hugeCursor)
+      === SingleToken (replicate hugeDepth 1)
   ]
   where
     tok = Token . greenToken Name
@@ -427,7 +427,7 @@ cursorRegressions = once $ conjoin
     sharedSecond = case cursorChildAt 1 (rootCursor (Node (greenNode Root [shared, shared]))) of
       Right cursor -> cursor
       Left err -> error (show err)
-    hugeCursor = rootCursor (iterate (\child -> Node (greenNode Group [child, child])) (tok "x") !! 40)
+    hugeCursor = rootCursor (iterate (\child -> Node (greenNode Group [child, child])) (tok "x") !! hugeDepth)
 
 regressions :: Property
 regressions = once $ conjoin
@@ -437,7 +437,7 @@ regressions = once $ conjoin
   , nodeTextLength original === 22
   , fmap renderNode (replaceChild 0 (tok "y") original)
       === Right "y\t{- keep -}\r\n😀e\x0301\0"
-  , elementTextLength huge === 2 ^ (40 :: Int)
+  , elementTextLength huge === 2 ^ hugeDepth
   , nodeKind original === Root
   , elementKind (tok "x") === Name
   , fmap renderElement (replaceAt [] (tok "new") (Node original)) === Right "new"
@@ -453,7 +453,7 @@ regressions = once $ conjoin
       , Node (greenNode Group [tok "\r\n", tok "😀e\x0301\0", tok ""])
       ]
     -- A tiny shared DAG with a logical size above Word64. Never render it.
-    huge = iterate (\child -> Node (greenNode Group [child, child])) (tok "x") !! 40
+    huge = iterate (\child -> Node (greenNode Group [child, child])) (tok "x") !! hugeDepth
 
 main :: IO ()
 main = do

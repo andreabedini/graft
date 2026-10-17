@@ -6,6 +6,7 @@ green trees, cursor editing, builders, cache, and tests at revision
 b6f1cb6494a99a2264186d110b1b170989774814 (version 0.17.0 in Cargo.toml),
 retrieved on 2026-10-10. Graft is not affiliated with the Rowan project.
 
-Rowan is available under MIT OR Apache-2.0. Its MIT permission notice is
-preserved verbatim in licenses/ROWAN-MIT. Graft's own code is MIT licensed;
+Rowan is copyright Aleksey Kladov and the rust-analyzer contributors, and is
+available under MIT OR Apache-2.0. Its MIT permission notice is preserved
+verbatim in licenses/ROWAN-MIT. Graft's own code is MIT licensed;
 see LICENSE.
