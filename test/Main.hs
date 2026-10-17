@@ -209,6 +209,19 @@ propCursorTokenNavigation model =
             , fmap cursorPath (cursorPreviousToken focus) === maybeHead (reverse before)
             ]
 
+propCursorWalk :: Model -> Property
+propCursorWalk model = conjoin
+  [ map (fmap cursorPath) (cursorWalk (rootCursor (compile model))) === walk [] model
+  , conjoin
+      [ fmap (Text.unpack . cursorText) (cursorAt path (rootCursor (compile model))) === Right (source selected)
+      | (path, _, selected, _) <- contexts model
+      ]
+  ]
+  where
+    walk path (Leaf _ _) = [Enter path, Leave path]
+    walk path (Branch _ children) =
+      Enter path : concat [walk (path ++ [i]) child | (i, child) <- zip [0 ..] children] ++ [Leave path]
+
 -- Every occurrence reachable from an edited cursor, by any navigation, agrees
 -- with a fresh cursor on the edited tree; a second edit continues from there.
 propCursorEditNavigation :: Model -> Model -> Model -> Property
@@ -456,6 +469,7 @@ main = do
     , run "cursor occurrences and source ranges" propCursorOccurrences
     , run "cursor parent, child and sibling navigation" propCursorNavigation
     , run "cursor token navigation" propCursorTokenNavigation
+    , run "enter/leave walk and occurrence text" propCursorWalk
     , run "persistent cursor replacement and shifted ranges" propCursorReplacement
     , run "navigation and repeated edits from an edited cursor" propCursorEditNavigation
     , run "cursor invalid paths" propCursorInvalidPaths

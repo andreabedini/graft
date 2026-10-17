@@ -12,6 +12,7 @@ module Graft.Cursor
   , cursorGreen
   , cursorKind
   , cursorRange
+  , cursorText
   , cursorPath
   , cursorRoot
   , cursorAt
@@ -24,6 +25,8 @@ module Graft.Cursor
   , cursorChildren
   , cursorAncestors
   , cursorDescendants
+  , WalkEvent (..)
+  , cursorWalk
   , cursorTokens
   , cursorFirstToken
   , cursorLastToken
@@ -42,6 +45,7 @@ module Graft.Cursor
 
 import Control.Applicative ((<|>))
 import Control.DeepSeq (NFData (..))
+import Data.Text (Text)
 import Graft.Edit (ChildEditError (..), Path, PathError (..))
 import qualified Graft.Edit as Edit
 import Graft.Green
@@ -90,6 +94,10 @@ cursorKind = elementKind . cursorGreen
 -- | Absolute half-open byte range, including all token text and trivia.
 cursorRange :: Cursor kind -> TextRange
 cursorRange (Cursor green offset _ _) = rangeFromLength offset (elementTextLength green)
+
+-- | Exact source text of the focus, as 'renderElement'.
+cursorText :: Cursor kind -> Text
+cursorText = renderElement . cursorGreen
 
 -- | Child path from the snapshot's root to this occurrence. Takes time
 -- proportional to depth; counts both nodes and tokens.
@@ -181,6 +189,23 @@ cursorDescendants :: Cursor kind -> [Cursor kind]
 cursorDescendants cursor = go cursor []
   where
     go current rest = current : foldr go rest (cursorChildren current)
+
+-- | Entering or leaving an occurrence during a traversal.
+data WalkEvent a = Enter a | Leave a
+  deriving (Eq, Show, Functor, Foldable, Traversable)
+
+instance NFData a => NFData (WalkEvent a) where
+  rnf (Enter value) = rnf value
+  rnf (Leave value) = rnf value
+
+-- | Preorder traversal that also reports when each occurrence is left, as a
+-- formatter or pretty-printer needs to close what it opened. Every node and
+-- token is entered, then its children are walked, then it is left. Results
+-- are lazy and take time proportional to the number of occurrences.
+cursorWalk :: Cursor kind -> [WalkEvent (Cursor kind)]
+cursorWalk cursor = go cursor []
+  where
+    go current rest = Enter current : foldr go (Leave current : rest) (cursorChildren current)
 
 -- | All token occurrences in this subtree in source order, including empty
 -- tokens and trivia. Does not include tokens outside the focus.
