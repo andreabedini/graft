@@ -9,11 +9,24 @@ cabal haddock lib:graft
 ```
 
 Graft is tested with GHC 9.8, 9.10, 9.12 and 9.14 (see `tested-with` in
-`graft.cabal`). There are two test suites:
+`graft.cabal`). There are three test suites:
 
 - `graft-tests` checks the library against independent models.
 - `graft-example` builds and runs [`examples/ExactUpdate.hs`](examples/ExactUpdate.hs),
   so changes to the API that break the example break the build.
+- `graft-doctest` checks every `>>>` example in the Haddock documentation. It
+  is off by default because it needs the `doctest` package and a GHC
+  environment file, which cabal writes at the end of a build:
+
+  ```sh
+  cabal build all -fdoctest
+  cabal test graft-doctest -fdoctest
+  ```
+
+  On a fresh checkout the first `cabal test` would run before the file exists,
+  so build first; the suite says so if the file is missing. Examples in
+  `@`-blocks and `>`-blocks are not checked, so keep those short and compile
+  them by hand when they change.
 
 ## How the tests work
 

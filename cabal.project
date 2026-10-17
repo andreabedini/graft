@@ -1,0 +1,4 @@
+packages: .
+
+-- The doctest suite finds the library's dependencies through this file.
+write-ghc-environment-files: always
