@@ -19,8 +19,8 @@ build-type:      Simple
 tested-with:     GHC ==9.8.4 || ==9.10.3 || ==9.12.2 || ==9.14.1
 extra-source-files:
     bench/run.py
-    bench/results/2026-10-10/*.csv
-    bench/results/2026-10-10/environment.json
+    bench/results/**/*.csv
+    bench/results/**/*.json
 extra-doc-files:
     README.md
     CHANGELOG.md

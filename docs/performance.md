@@ -1,171 +1,146 @@
-# Graft performance baseline
+# Graft performance
 
-This report records the first measured baseline for Graft. It covers the existing
-list representation and immutable cursors. It introduces no interning or library
-optimisations. The [run guide](../bench/README.md) gives reproduction commands.
+This report records Graft's benchmark results and compares them with the first
+baseline. The [run guide](../bench/README.md) explains how to reproduce them.
 
-## Environment and method
+## Method
 
-The baseline uses revision `6ddf6b12` on 10 October 2026. The library and benchmark
-component compile with GHC 9.12.2, Cabal 3.16.1.0, and `-O2`. The benchmark uses
-`tasty-bench` 0.3.5, `text` 2.1.2, and `deepseq` 1.5.1.0. The machine runs Fedora
-Linux on an Intel Xeon w3-2435. Each measurement process runs on CPU 2.
-The CPU governor is `powersave`. Other host activity remains uncontrolled.
+The benchmark suite ([source](../bench/Main.hs)) runs these workloads:
 
-Each timing pass requests 2% relative standard deviation, with a three-second
-limit per case. The runtime collects allocation statistics and uses a 32 MiB
-allocation area. The suite runs twice, sequentially. Times measure CPU execution,
-including garbage collection, rather than elapsed wall time.
-
-Prepared environments force input text and green trees before timing. Rendering
-forces the strict `Text` result. Navigation consumes ranges or a strict sum over
-visited ranges. Construction and editing consume cached root lengths. Green
-smart constructors force the immediate cache sums, which force the rebuilt
-ancestors. This measures completed edits without traversing unchanged descendants.
-The deep focus cases prepare their selected cursor before timing.
-
-The [benchmark source](../bench/Main.hs) defines these workloads:
-
-| Workload | Shape and observations |
+| Workload | Shape |
 | --- | --- |
-| Token | ASCII or emoji text with 32 or 4,096 UTF-8 bytes; token construction |
-| Wide | 100, 1,000, or 10,000 immediate tokens, each with distinct Unicode text |
-| Deep | 100, 1,000, or 10,000 unary wrapper nodes above one `001` token |
-| Document | 1,000 line nodes with five tokens per line: name, spacing, number, comment, CRLF |
+| Token | ASCII or emoji text of 32 or 4,096 UTF-8 bytes |
+| Wide | One node with 100, 1,000 or 10,000 tokens, each with distinct Unicode text |
+| Deep | 100, 1,000 or 10,000 nested single-child nodes above one `001` token |
+| Chain | A left-nested operator chain `((0 + 1) + 2) + …` with 100, 1,000 or 10,000 operators, so both deep and wide |
+| Document | 1,000 line nodes of five tokens each: name, spacing, number, comment, CRLF |
 
-Wide cases measure direct and builder construction, subtree reuse, checkpoint
-wrapping, rendering, indexed children, adjacent siblings, offset lookup, covering
-ranges, replacement at three positions, insertion, and typed token fields.
-Deep cases measure construction, rendering, descent, offset lookup, path and
-cursor replacement, and return to the root. Document cases measure construction,
-rendering, token traversal, typed node fields, and 100 successive edits.
+The cases cover construction (directly, with the pure builder and with the
+`Build` monad), rendering, child access, sibling iteration, offset and range
+lookup, replacement and splicing, typed fields, whole-tree traversal and 100
+successive edits. Inputs are fully evaluated before timing, and each case
+consumes its result: rendered text, a cached length, or a strict sum of visited
+ranges. `bench/Fixtures.hs` checks every workload against independently built
+text before measuring (`graft-bench --check`).
 
-The document edits replace one middle number token with successive decimal
-values. The timing case `100-edits-latest` observes the final root's cache.
-The timing case `100-edits-history` sums every snapshot's cache as a stream.
-It does not retain the whole history across a garbage collection. The separate
-residency case `history` keeps all 101 roots. Fixed trivia text can share through
-ordinary compiler evaluation.
-The wide fixture uses distinct spellings to avoid assuming automatic deduplication.
-Construction includes Graft's token byte counting. Source generation for wide
-construction is outside timing. Document construction includes name generation.
+Each timing pass asks `tasty-bench` for a relative standard deviation of 2%,
+with a three-second limit per case, and the suite runs twice. Times are CPU
+time including garbage collection. Allocation is per operation. Separate
+processes measure residency: the live heap after a full collection, minus the
+live heap at startup.
 
-The fixture checks compare rendered source with independently assembled text,
-verify known UTF-8 lengths, and check exact changed text after repeated edits.
-They also check retained originals, path/focus agreement, builder output, typed
-fields, sibling observations, and the full deep paths. The separate property
-suite remains the correctness check for general inputs.
+Both runs used GHC 9.12.2 with `-O2` on an Intel Xeon w3-2435 under Fedora
+Linux, pinned to CPU 2 with the `powersave` governor. Other activity on the
+machine was not controlled.
 
-## Reading the raw measurements
+| Run | Code measured | Results |
+| --- | --- | --- |
+| 2026-10-10 | List children, before the review changes | [timing 1](../bench/results/2026-10-10/timing-1.csv), [timing 2](../bench/results/2026-10-10/timing-2.csv), [residency](../bench/results/2026-10-10/residency.csv), [environment](../bench/results/2026-10-10/environment.json) |
+| 2026-10-17 | Array children, cursor edits, single-buffer rendering | [timing 1](../bench/results/2026-10-17/timing-1.csv), [timing 2](../bench/results/2026-10-17/timing-2.csv), [residency](../bench/results/2026-10-17/residency.csv), [environment](../bench/results/2026-10-17/environment.json) |
 
-Each timing CSV contains the mean in picoseconds, twice the estimated standard
-deviation, allocated bytes per operation, copied bytes per operation, and peak
-process memory. One picosecond is one trillionth of a second. Peak memory is a
-cumulative runtime measurement across the process, not live bytes per operation.
-The allocation estimates include the benchmark's observation of the result.
+Each environment record includes SHA-256 hashes of the sources and the
+executable. The 2026-10-17 run measured the commit "perf: render without
+per-node closures and climb to the root strictly".
 
-Residency cases run in separate processes and force their selected results.
-A live reference retains the result through a full garbage collection, then
-the process reads it again. The live-byte difference subtracts startup live
-memory. It includes fixture and runtime overhead. Residency is not operating-system
-resident memory, and total allocation includes the discarded intermediate trees.
-The shared case repeats one line subtree. The ordinary document uses distinct
-names, so this comparison demonstrates explicit reuse rather than an interner.
+The tables give the smaller and larger mean of the two passes, so a range is
+not a confidence interval. In 2026-10-17, 6 of 107 cases in the first pass and
+1 in the second ended at the time limit before reaching the requested
+precision, with at most 16% spread (twice the standard deviation over the
+mean). The 2026-10-10 run missed in 43 and 29 of its 89 cases, with up to 42%.
+Treat differences of less than about 20% as noise.
 
-Times depend on the compiler, machine, runtime configuration, and tree shape.
-A timing limit can end a measurement before its target deviation is reached.
-The raw deviation columns expose this uncertainty. These results establish a
-baseline for Graft and make no performance comparison with Rowan.
+## Results
 
-## Measured results
+Times are in microseconds.
 
-Both passes completed all 89 timing cases. Their raw files are
-[pass one](../bench/results/2026-10-10/timing-1.csv) and
-[pass two](../bench/results/2026-10-10/timing-2.csv). The
-[environment record](../bench/results/2026-10-10/environment.json) identifies
-the executable and sources by SHA-256 hashes.
+### Wide node, 10,000 children
 
-The tables show the smaller and larger mean from the two passes. These ranges
-are not confidence intervals. A microsecond (µs) is one millionth of a second.
-A kibibyte (KiB) is 1,024 bytes. A mebibyte (MiB) is 1,048,576 bytes.
-Allocation ranges also use the two reported estimates.
-
-| Wide children | First child, µs | Last child, µs | Replace first, µs | Replace last, µs |
-| ---: | ---: | ---: | ---: | ---: |
-| 100 | 0.032–0.038 | 0.882–0.907 | 0.371–0.395 | 0.852–0.941 |
-| 1,000 | 0.032–0.038 | 9.847–10.470 | 3.809–3.835 | 10.055–10.492 |
-| 10,000 | 0.039–0.041 | 209.792–217.663 | 50.055–60.333 | 215.742–230.584 |
-
-| Selected case | Time, µs | Allocated, KiB |
+| Case | 2026-10-10 | 2026-10-17 |
 | --- | ---: | ---: |
-| Wide 10,000, direct construction | 483–518 | 2,446 |
-| Wide 10,000, builder tokens | 949–1,020 | 3,936–3,961 |
-| Wide 10,000, builder subtree reuse | 723–732 | 2,147 |
-| Wide 10,000, rendering | 337–352 | 1,420 |
-| Wide 10,000, last child | 210–218 | 862 |
-| Wide 10,000, last-token offset lookup | 729–812 | 3,413 |
-| Wide 10,000, middle insertion | 116–137 | 415 |
-| Wide 10,000, first typed token | 0.062–0.066 | 0.37 |
-| Wide 10,000, last typed token | 576–642 | 2,936 |
-| Deep 10,000, rendering three bytes | 192–207 | 464 |
-| Deep 10,000, path replacement | 795–990 | 3,486 |
-| Deep 10,000, replacement with prepared cursor | 398–419 | 1,891–1,929 |
-| Document 1,000, construction | 273–312 | 1,513 |
-| Document 1,000, rendering 22,893 bytes | 189–213 | 751 |
-| Document 1,000, all token ranges | 619–668 | 2,944 |
-| Document 1,000, all typed line fields | 71–75 | 398 |
-| Document 1,000, 100 successive edits | 770–774 | 3,574 |
+| First child | 0.039–0.041 | 0.003 |
+| Last child | 210–218 | 0.004 |
+| Offset lookup, last token | 729–812 | 0.056–0.058 |
+| Offset lookup, first token | — | 0.054–0.056 |
+| Covering range, last token | 609–750 | 0.035–0.036 |
+| Replace first child | 50.1–60.3 | 9.6–10.1 |
+| Replace last child | 216–231 | 8.8–9.0 |
+| Splice in the middle | 116–137 | 12.7–13.0 |
+| Iterate all siblings | 551–582 | 312–326 |
+| Last typed token | 576–642 | 302–319 |
+| Render | 337–352 | 41.9–42.3 |
+| Construct directly | 483–518 | 233–239 |
+| Construct with the builder | 949–1,020 | 476–483 |
+| Construct with `Build` | — | 478–488 |
 
-The requested precision was not reached in 43 cases during pass one and 29 cases
-during pass two. The largest reported twice-standard-deviation values were 42%
-and 29% of the mean. Returning from a prepared 10,000-level cursor to its root
-also varied from 75 to 186 µs between passes. These variations limit fine comparisons.
+Child access and lookups are now independent of width. Replacement still
+copies the parent's child array, so it is linear in the width, but it no
+longer re-sums every child's length. Rendering copies each token once into a
+buffer sized from the cached length.
 
-The [residency measurements](../bench/results/2026-10-10/residency.csv) report
-live heap after a full collection. The table subtracts startup live memory.
-Each row uses its own process, and these cases run once per policy and size.
-Edited policies apply 100 edits. History includes the original root.
+### Deep and chain trees, 10,000 levels
 
-| Retained result | 1,000 lines, MiB | 10,000 lines, MiB |
+| Case | 2026-10-10 | 2026-10-17 |
 | --- | ---: | ---: |
-| Original tree | 0.558 | 5.571 |
-| One explicitly reused line subtree | 0.025 | 0.231 |
-| Latest edited root | 0.589 | 5.601 |
-| All 101 snapshots | 1.768 | 17.080 |
-| One middle token cursor | 0.600 | 5.716 |
-| Only that cursor's green token | 0.032 | 0.032 |
+| Deep: construct | 166–185 | 164–166 |
+| Deep: descend to the leaf | 475–511 | 267–269 |
+| Deep: render three bytes | 192–207 | 42.5–43.2 |
+| Deep: offset lookup | 1,237–1,384 | 590–605 |
+| Deep: replace by path | 795–990 | 790–797 |
+| Deep: replace through a prepared cursor | 398–419 | 170–171 |
+| Deep: prepared cursor to root | 75.2–186 | 22.9–23.0 |
+| Chain: all tokens | — | 1,769–1,824 |
+| Chain: offset lookup, first token | — | 565–572 |
 
-For 10,000 lines, constructing and editing while retaining only the latest root
-allocates about 59 MiB in total. The final live heap is about 5.6 MiB.
-Allocation and retention measure different costs. Releasing earlier snapshots
-allows collection of their rebuilt list prefixes while preserving reused syntax.
+Deep cases are bounded by depth, which the array representation doesn't
+change. Construction allocates more per level than before (1.2 MiB rather than
+0.8 MiB), because each node now holds two small arrays.
 
-## Consequences for further work
+The chain workload is new. Before the review, whole-tree traversal was
+quadratic in depth. A separate measurement of the code before the review
+took 346 ms and allocated 1.8 GB to visit every token of a 4,000-operator
+chain; the 10,000-operator chain now takes 1.8 ms.
 
-Wide indexed navigation is a clear candidate for investigation. The first child
-remains cheap while lookup near the end grows with the child list.
-Offset and typed-field searches also scan candidate siblings and allocate cursors.
-Compare an indexed child representation or a direct green search against this
-baseline before changing the public representation.
+### Document, 1,000 lines
 
-Replacement at the first child still scans all immediate caches. Its cost grows
-from about 0.4 µs to 50–60 µs across these widths. Replacement near the end also
-rebuilds a longer list prefix. Experiments can separate incremental cache updates
-from changes to child storage, with the existing property suite checking both.
+| Case | 2026-10-10 | 2026-10-17 |
+| --- | ---: | ---: |
+| Construct | 273–312 | 136–137 |
+| Render 22,893 bytes | 189–213 | 23.4–23.6 |
+| All token ranges | 619–668 | 252–254 |
+| All typed line nodes | 71.2–74.5 | 36.7 |
+| 100 successive edits | 770–774 | 65.0–65.4 |
 
-Prepared cursors avoid repeated deep descent. Their replacement measurements
-are about half the corresponding path-replacement times in this fixture.
-The successful 10,000-level checks establish a tested case, not a general stack
-safety guarantee. Rendering still traverses all wrapper nodes, even for three
-bytes of text.
+### Retained memory
 
-Explicit subtree reuse reduces retained memory, and latest-only editing does
-not retain the whole history. A cursor still keeps its original root alive.
-Long-lived application caches can retain green tokens when they need only text,
-or release cursors when their snapshots are no longer needed.
+Live heap in MiB after a full collection, minus startup. Edited cases apply 100
+edits to the middle line.
 
-The baseline does not establish a need for an interner. It supplies no measured
-duplicate rate from a real parser workload. Interning experiments first need
-representative repeated syntax and a comparison of construction time, retained
-memory, and cache lifetime. Start with the visible costs of wide navigation and
-ancestor reconstruction, and retain these measurements for future comparisons.
+| Retained result | 2026-10-10, 1,000 lines | 2026-10-17, 1,000 lines | 2026-10-10, 10,000 lines | 2026-10-17, 10,000 lines |
+| --- | ---: | ---: | ---: | ---: |
+| Original tree | 0.558 | 0.505 | 5.571 | 5.037 |
+| One line subtree, reused for every line | 0.025 | 0.017 | 0.231 | 0.154 |
+| Latest edited tree | 0.589 | 0.505 | 5.601 | 5.037 |
+| All 101 versions | 1.768 | 1.319 | 17.080 | 12.923 |
+| A cursor on one middle token | 0.600 | 0.505 | 5.716 | 5.037 |
+| Only that cursor's green token | 0.032 | 0.001 | 0.032 | 0.001 |
+
+A document of 10,000 lines (238,894 bytes of source, 50,000 tokens) takes about
+105 bytes of heap per token, or 22 per source byte. Keeping every version costs
+less than before because an edit copies one child array per ancestor instead of
+rebuilding list prefixes. A cursor keeps its whole tree alive. Building and
+editing the 10,000-line document allocates 19 MiB in total, down from 59 MiB.
+
+## What the numbers suggest
+
+- Memory per token is the largest remaining cost. Each token occupies an array
+  slot, a `Token` box and a `GreenToken` record with its text, and nothing
+  deduplicates identical tokens such as `;` or a single space. A node cache
+  like Rowan's could share them. Its value depends on duplicate rates in real
+  parser output, which haven't been measured.
+- Edits in very wide nodes copy the whole child array. A chunked or
+  finger-tree child list would make them logarithmic, at a cost to access and
+  memory in the common case.
+- Deep traversals allocate a cursor per occurrence. A traversal that reads only
+  green elements, or a fold, would avoid that when ranges aren't needed.
+
+These results describe Graft alone and make no comparison with Rowan.
