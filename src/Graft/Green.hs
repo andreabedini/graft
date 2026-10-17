@@ -7,7 +7,8 @@ module Graft.Green
   ( GreenNode
   , GreenToken
   , GreenElement (..)
-  , TextLength
+  , TextLength (..)
+  , textLengthOf
   , greenNode
   , greenToken
   , nodeKind
@@ -90,8 +91,8 @@ renderElement (Token token) = tokenText token
 renderElement element
   | total == 0 = Text.empty
   | otherwise = runST $ do
-      target <- Array.new total
-      let write offset (Token (GreenToken _ len (Text source start _))) =
+      target <- Array.new bytes
+      let write (TextLength offset) (Token (GreenToken _ (TextLength len) (Text source start _))) =
             Array.copyI len target offset source start
           write offset (Node node) = go 0
             where
@@ -103,6 +104,7 @@ renderElement element
                     go (index + 1)
       write 0 element
       result <- Array.unsafeFreeze target
-      pure (Text result 0 total)
+      pure (Text result 0 bytes)
   where
     total = elementTextLength element
+    bytes = fromIntegral total

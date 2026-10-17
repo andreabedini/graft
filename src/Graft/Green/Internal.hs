@@ -1,4 +1,6 @@
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MagicHash #-}
 
 -- | Representation of green trees, for code that needs to work below the
@@ -7,7 +9,8 @@
 -- the rest of the library relies on. Prefer "Graft.Green".
 module Graft.Green.Internal
   ( -- * Representation
-    TextLength
+    TextLength (..)
+  , textLengthOf
   , GreenNode (..)
   , GreenToken (..)
   , GreenElement (..)
@@ -34,12 +37,22 @@ import Data.Text (Text)
 import qualified Data.Text.Foreign as Text
 import GHC.Exts (isTrue#, reallyUnsafePtrEquality#)
 
--- | A non-negative count of UTF-8 bytes, including all trivia, in the same
--- 'Int' unit that "Data.Text" and "Data.ByteString" use for lengths. This is
--- neither a character count nor a UTF-16 code-unit count. Shared subtrees make
--- a logical length exceed the physical text size; sums are not checked for
--- overflow, which needs a logical length beyond @maxBound :: Int@.
-type TextLength = Int
+-- | A count of UTF-8 bytes, used for lengths and for offsets from the start
+-- of a tree. It is neither a character count (as 'Data.Text.length' returns)
+-- nor a UTF-16 code-unit count (as the Language Server Protocol uses), and
+-- the newtype keeps those from being mixed up by accident. Numeric literals
+-- and arithmetic work as for 'Int'; use the constructor or 'fromIntegral' to
+-- convert deliberately.
+--
+-- Shared subtrees make a logical length exceed the physical text size; sums
+-- are not checked for overflow, which needs a logical length beyond
+-- @maxBound :: Int@.
+newtype TextLength = TextLength Int
+  deriving newtype (Eq, Ord, Show, Read, Bounded, Enum, Num, Real, Integral)
+
+-- | The UTF-8 byte length of a text, in constant time.
+textLengthOf :: Text -> TextLength
+textLengthOf = TextLength . Text.lengthWord8
 
 -- | An internal node: its kind, its cached total length, its children in
 -- source order, and the start of each child relative to the node.
@@ -87,7 +100,7 @@ greenNode kind children = runST $ do
   let fill !_ !offset [] = pure offset
       fill !index !offset (!child : rest) = do
         writeSmallArray elements index child
-        writePrimArray starts index offset
+        writePrimArray starts index (bytes offset)
         fill (index + 1) (offset + elementTextLength child) rest
   total <- fill 0 0 children
   freeze kind total elements starts
@@ -105,7 +118,7 @@ greenNodeReversed kind count reversed = runST $ do
         | index == count = pure offset
         | otherwise = do
             child <- readSmallArray elements index
-            writePrimArray starts index offset
+            writePrimArray starts index (bytes offset)
             measure (index + 1) (offset + elementTextLength child)
   total <- measure 0 0
   freeze kind total elements starts
@@ -116,13 +129,16 @@ freeze
 freeze kind total elements starts =
   GreenNode kind total <$> unsafeFreezeSmallArray elements <*> unsafeFreezePrimArray starts
 
+bytes :: TextLength -> Int
+bytes (TextLength count) = count
+
 missingChild :: a
 missingChild = error "Graft.Green.Internal: uninitialised child"
 
 -- | Construct a token. 'Text' stores UTF-8 internally, so reading the byte
 -- length takes constant time and copies nothing.
 greenToken :: kind -> Text -> GreenToken kind
-greenToken kind text = GreenToken kind (Text.lengthWord8 text) text
+greenToken kind text = GreenToken kind (textLengthOf text) text
 
 -- | Read the cached UTF-8 byte length of either element.
 elementTextLength :: GreenElement kind -> TextLength
@@ -142,7 +158,7 @@ childAt (GreenNode _ _ children _) = indexSmallArray children
 childStart :: GreenNode kind -> Int -> TextLength
 childStart (GreenNode _ len _ starts) index
   | index >= sizeofPrimArray starts = len
-  | otherwise = indexPrimArray starts index
+  | otherwise = TextLength (indexPrimArray starts index)
 
 -- | The smallest index whose child ends at or after a relative offset, or the
 -- child count if there is none. Binary search over the cached child offsets.
@@ -173,7 +189,7 @@ setChild index !replacement node@(GreenNode kind len children starts) =
       | delta == 0 = starts
       | otherwise = generatePrimArray count $ \position ->
           let start = indexPrimArray starts position
-          in if position <= index then start else start + delta
+          in if position <= index then start else start + bytes delta
 
 -- | Replace the children in @[start, end)@, which must satisfy
 -- @0 <= start <= end <= childCount node@. Offsets before the range are
@@ -191,7 +207,7 @@ spliceChildrenUnchecked start end replacements node@(GreenNode kind len children
   let place !_ !offset [] = pure offset
       place !index !offset (!child : rest) = do
         writeSmallArray elements index child
-        writePrimArray offsets index offset
+        writePrimArray offsets index (bytes offset)
         place (index + 1) (offset + elementTextLength child) rest
   afterInserted <- place start (childStart node start) replacements
   let delta = afterInserted - childStart node end
@@ -199,7 +215,7 @@ spliceChildrenUnchecked start end replacements node@(GreenNode kind len children
         | position == suffix = pure ()
         | otherwise = do
             writePrimArray offsets (start + inserted + position)
-              (indexPrimArray starts (end + position) + delta)
+              (indexPrimArray starts (end + position) + bytes delta)
             shift (position + 1)
   copySmallArray elements (start + inserted) children end suffix
   shift 0

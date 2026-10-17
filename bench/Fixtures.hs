@@ -32,7 +32,7 @@ newtype PreparedCursor = PreparedCursor { preparedCursor :: Cursor Kind }
 
 instance NFData PreparedCursor where
   rnf (PreparedCursor cursor) = forceElement (cursorGreen (cursorRoot cursor)) `seq`
-    rnf (cursorPath cursor) `seq` rnf (cursorEnd cursor)
+    rnf (cursorPath cursor) `seq` cursorEnd cursor `seq` ()
 
 forceElement :: GreenElement Kind -> ()
 forceElement element = elementKind element `seq` elementTextLength element `seq`
@@ -190,7 +190,7 @@ checkFixtures = do
       assert "builder reuse" (buildReuse node == node)
       assert "checkpoint source" (renderNode (buildCheckpoint node) == Text.concat texts)
       assert "wide UTF-8 cache" (nodeTextLength node == sum
-        [4 + length (show index) | index <- [1 .. count]])
+        [4 + fromIntegral (length (show index)) | index <- [1 .. count]])
       assert "last offset" (cursorEnd (checked (cursorChildAt (count - 1) root)) == nodeTextLength node)
       assert "sibling observation" (siblingSum root == sum (map cursorEnd (cursorChildren root)))
       assert "typed last token" (cursorEnd (tokenSyntax (selected (astToken root :: Maybe Numbered))) == nodeTextLength node)
