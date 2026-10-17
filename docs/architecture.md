@@ -1,329 +1,203 @@
-# Graft: concrete syntax architecture
+# Graft architecture
 
-Graft provides concrete syntax infrastructure for bidirectional parsing,
-printing, and semantic updates that preserve untouched text. A concrete syntax
-tree retains the source spelling and trivia (whitespace and comments), rather
-than just the semantic structure of an abstract syntax tree (AST). Parsers and
-lexers are supplied by applications.
+This note explains how Graft is put together and why, and where it departs from
+Rowan. The Haddock documentation is the reference for individual functions.
 
-## The immutable core
+## Scope
 
-A green token is a leaf with a syntax kind, exact Unicode text, and a cached
-UTF-8 byte length. A green node has a syntax kind, ordered child elements, and
-their cached total length. A green element is either a node or a token. The
-type parameter `kind` is the application's own syntax-kind type. Empty nodes
-and tokens are valid; repeated references to the same subtree are valid too.
+Graft is the tree layer of a concrete-syntax toolchain. A concrete syntax tree
+keeps the source's exact spelling, including whitespace and comments (trivia),
+where an abstract syntax tree keeps only its meaning. Graft stores such trees,
+navigates them, edits them persistently and prints them back. Lexing, parsing,
+grammar validation and formatting policy belong to the application.
 
-Green values contain no parents or absolute positions. `GreenNode` and
-`GreenToken` have hidden constructors; smart constructors establish the length
-invariants. `TextLength` is an alias for `Int`, the length unit of `text` and
-`bytestring`. Reading a cache never walks the children or token text. Construction
-requires finite, acyclic input, as ordinary Haskell recursion can otherwise
-define non-terminating values.
+## Green trees
 
-Rendering concatenates leaves in source order through a text builder. All
-source fragments must appear in token text: Graft does not synthesize spaces,
-discard comments, or normalize Unicode or line endings. Valid Unicode text
-round-trips exactly; arbitrary invalid UTF-8 bytes are outside the contract.
+A green token is a leaf with a syntax kind and exact `Text`. A green node has a
+kind and an ordered list of children, each a node or a token. The kind is a
+type parameter, so an application uses its own enumeration with no conversion
+to integers. Empty nodes and tokens are valid, and the same subtree may appear
+any number of times.
 
-## Why this representation differs from Rowan
+Green values have no parents and no absolute positions, so a subtree can be
+shared between trees and between versions of one tree. Their constructors are
+hidden, and the smart constructors `greenNode` and `greenToken` establish the
+cached lengths. `Graft.Green.Internal` exposes the representation for code that
+needs it, outside the package's versioning policy.
 
-Rowan uses compact reference-counted allocations, integer syntax tags,
-fixed-width lengths, and child offsets. Graft starts with ordinary algebraic
-data types and child lists, relying on Haskell's garbage collector and value
-reuse. Parameterized kinds allow application enums without a conversion layer.
-Byte counts are machine integers, as in `text` and `bytestring`. A small shared
-graph can still have a logical text size far beyond anything that can be
-rendered, since the result must fit in a strict `Text`; the cached sum itself
-is not checked and would need a logical size beyond `maxBound :: Int` to overflow.
+All lengths and offsets are `TextLength`, a newtype over `Int` counting UTF-8
+bytes. `Text` is stored as UTF-8, so a token's byte length is read in constant
+time. The newtype keeps byte offsets apart from character counts and from the
+UTF-16 positions that language clients send; `Graft.LineIndex` converts between
+them.
 
-Whitespace and comments are ordinary child tokens initially. Rowan's current
-leading/trailing trivia representation is not ported yet. This choice preserves
-exact text with one leaf model, while leaving trivia ownership and compatibility
-as explicit future decisions. Graft supplies structural equality, not a public
-pointer-identity operation. Independently constructed equal trees are not
-automatically deduplicated.
+Rendering writes every token's text in source order into one buffer sized from
+the cached length. Graft never inserts separators or normalizes text: every
+byte of output came from some token. Valid Unicode round-trips exactly; invalid
+UTF-8 is outside the contract.
 
-## Persistent updates and their costs
+Trivia is ordinary tokens. Rowan attaches leading and trailing trivia to tokens;
+Graft doesn't, so that there is one kind of leaf and no rule about which token
+owns a comment. Applications that want ownership can express it with node
+structure.
 
-A `Path` is a list of zero-based child indices, counting nodes and tokens. The
-empty path selects the root. `elementAt` looks up the selected element;
-`replaceAt` replaces it and returns a new root. Invalid steps return a
-`PathError` without a partial edit. Replacement may change kind or element form;
-grammar validation belongs to the application. Paths inside a replaced subtree
-must be reconsidered against the new tree version.
+## Representation and costs
 
-Replacement rebuilds ancestor nodes and child-list prefixes along the path.
-Sibling elements, descendant subtrees outside the edit, and list suffixes are
-reused. Ancestor lengths are recomputed by summing immediate child caches, so no
-untouched descendant text is traversed. The original root remains available.
+A node stores its kind, its total length, its children in a `SmallArray`, and
+the start of each child relative to the node in a `PrimArray Int`. This is the
+same information Rowan keeps: the child offsets make child access constant time
+and let offset lookup binary-search each level instead of scanning.
 
-Node construction costs a traversal of its immediate children. Token construction
-reads the UTF-8 byte length of the `Text` in constant time. Path lookup scans
-list prefixes. Replacement cost follows the sum of ancestor child counts.
-Rendering traverses every token occurrence and allocates the output; sharing
-cannot eliminate repeated source occurrences. Deep recursion may exhaust the
-stack. No performance or memory advantage over Rowan is claimed without
-benchmarks.
+| Operation | Cost |
+| --- | --- |
+| Length of a node or token | Constant |
+| Child by index, first or last child, sibling | Constant |
+| Token or element at an offset | Logarithmic in the width of each level, times depth |
+| Building a node | Linear in its number of children |
+| Replacing a child | Linear in the parent's width: the array is copied, and the length is adjusted by the difference |
+| Splicing children | Linear in the parent's width plus the replacements |
+| Rendering | Linear in the output |
 
-## Child insertion, removal, and splicing
+No operation traverses descendants it doesn't change. Equality is structural
+but returns immediately for physically identical nodes, so comparing two
+versions that share most of their structure is cheap when the shared parts are
+the same values.
 
-The fourth milestone adds `spliceChildren`, which replaces a half-open range
-of immediate children with a list of green elements. Its integer boundaries
-count both nodes and tokens, including empty elements. They range from zero
-through the child count, inclusive. Equal boundaries insert. An empty
-replacement deletes. `insertChild` inserts one element, allowing append at the
-child count. `removeChild` requires an existing child and avoids incrementing
-the supplied index, so extreme indices cannot overflow.
+Graft has no node cache. Rowan's builder interns identical nodes and tokens to
+save memory; Graft only shares what the application shares, for example by
+emitting existing green elements into a builder. Interning remains an open
+question that needs measurements from real parsers.
 
-The original parent kind survives, even when all its children are removed.
-Untouched elements and the following list suffix are reused. Construction scans
-immediate child caches to establish the new total length. Descendant text needs
-no traversal. Callers supply all new punctuation and whitespace. Trivia outside
-the selected child range remains untouched. No grammar or formatting repair occurs.
+## Cursors
 
-Path variants select a node in a green root, edit its children, and rebuild its
-ancestors. Cursor variants edit the focused node and rebuild through its context.
-Both return a new green root and retain the original snapshot. A token cannot be
-a child-edit target. An empty path selects the root node, and removing all
-children retains that root as an empty node.
+A cursor is a zipper. It holds the focused element, its absolute offset, and a
+chain of contexts: for each ancestor, the parent node, the parent's offset, and
+the focus's index in it. Moving down, up or sideways is constant time, and the
+cursor computes absolute ranges from the cached child offsets.
 
-`ChildEditError` separates path errors, token targets, and invalid boundaries.
-Path validation precedes token-target validation, which precedes boundary
-validation. Boundaries are checked in this order: negative start, negative end,
-reversed range, start bounds, then end bounds. Errors return no partial edit.
-Rowan accepts generic range bounds for green splicing and first collects the
-children into a vector. Graft uses one explicit half-open convention, rebuilds
-list prefixes, and retains the following suffix. Path and focus helpers connect
-this node edit to persistent root reconstruction.
+A cursor also records whether its focus has been replaced. `replaceFocus`
+doesn't rebuild anything; it returns a cursor with the new focus and that flag
+set. The parent is rebuilt when the cursor next moves up or sideways, and the
+rebuilt parent is marked as replaced in turn. So a run of edits in one region,
+such as renaming every token in a list, rebuilds each ancestor once rather than
+once per edit, and the cursor stays usable for navigation throughout.
+`cursorTree` climbs to the root and returns the edited tree.
 
-Edits can shift paths as well as byte ranges. Empty inserted elements shift
-indices without adding text. Removed occurrences have no counterpart in the
-new snapshot. Applications must reconsider paths after editing and start a new
-cursor to observe the result. This milestone supplies individual structural
-edits without occurrence tracking or a batch-edit protocol across versions.
+Edits are persistent. The cursor you started with still sees the original tree,
+and so does every cursor derived from it before the edit. Paths and byte ranges
+in the edited tree can differ from those in the original; a cursor derived from
+the edited cursor sees the new ones. There is no occurrence identity across
+versions: Graft can't tell you where an element of the old tree went in the new
+one.
 
-## Red cursors and source ranges
+Rowan has separate node and token cursors, and offers mutable red trees
+(`clone_for_update`) so that edits are visible through every handle. Graft has one cursor type for both and
+no mutation; returning a cursor from each edit gives the same ability to keep
+working after an edit, without shared mutable state.
 
-The second milestone adds an immutable red cursor: a zipper focusing a node or
-token occurrence with its context. `Cursor kind` contains a green focus, its
-absolute byte offset, and parent breadcrumbs. Each breadcrumb retains the
-original parent node and offset, its context, the child's index, preceding
-siblings in reverse order, and following siblings. This is an ordinary algebraic
-data type with no unsafe code, mutable references, or separate allocation layer.
+## Lookup by offset
 
-`rootCursor` starts at offset zero. Child navigation computes offsets from cached
-sibling lengths. Parent and adjacent sibling moves restore context in constant
-time; child indexing and last-child navigation scan lists. `cursorPath` and
-`cursorRoot` walk the ancestor chain. Traversals are lazy and visit shared green
-values once per occurrence. Token navigation includes empty tokens and skips
-tokenless nodes; moving to the next or previous token from a node crosses the
-entire focused subtree.
+`TextRange` is a half-open interval of byte offsets with validated endpoints.
+Offsets need not lie on character boundaries.
 
-A cursor belongs to its original snapshot. `replaceFocus` rebuilds ancestors
-and returns a new green root, preserving the old cursor and snapshot. Navigating
-the result requires a new cursor; later offsets may have changed. A live cursor
-retains its original ancestors and therefore the original green root. Cursors
-do not expose pointer identity or occurrence equality. Paths distinguish repeated
-green values only within a known snapshot.
+`tokenAtOffset` treats token ranges as closed when deciding what an offset
+touches. An offset inside a token returns that token. An offset on the boundary
+between two tokens returns both, left first, as an editor needs at a cursor
+position between two words. The start and end of the text return the first and
+last token. Empty tokens are skipped by this lookup, though navigation still
+visits them.
 
-`TextRange` is an abstract half-open UTF-8 byte interval with validated endpoints.
-`textRange` takes start and end, rejecting a reversed interval;
-`rangeFromLength` takes start and length. Byte offsets may lie inside multibyte
-characters. Ordinary point containment excludes the end, while range containment
-accepts an empty query at either endpoint.
+`coveringElement` returns the innermost element whose range contains a query
+range, descending into the first covering child at each level. An empty query
+on a boundary therefore picks the leftmost candidate, including empty
+elements. These rules are Graft's own and may differ from Rowan's tie-breaking.
 
-Offset lookup uses closed endpoint contact: `tokenAtOffset` returns a single
-nonempty token in its interior, both neighbors at a shared boundary, or no token
-outside the focus. Empty tokens remain navigable but do not participate in offset
-lookup. The end of file (EOF) selects the last nonempty token. Cached ranges prune unrelated
-subtrees, so lookup need not render or enumerate the whole tree.
+## Builders
 
-`coveringElement` repeatedly descends into the first child whose range contains
-the query. At ambiguous empty ranges, this deterministic choice favors the first
-covering child in source order, including empty elements. It returns the
-innermost element on that branch, not a globally deepest candidate. Out-of-focus
-queries return no element. These boundary rules are part of Graft's contract;
-they do not promise Rowan's exact tie-breaking behavior.
+A builder holds the elements emitted so far, in reverse order, and a stack of
+open nodes with the position where each started. Closing a node collects the
+elements emitted since its start into a node. A checkpoint is a position in
+that sequence, counted in elements; `startNodeAt` opens a node at an earlier
+checkpoint, so a parser can wrap an operand after seeing the operator that
+follows it.
 
-## Pure builders and positional checkpoints
+Checkpoints are positions, not handles, exactly as in Rowan: a checkpoint
+taken inside a node that has since closed may be out of range, or may become
+valid again after more elements are emitted. The builder checks only that the
+position lies within the current node.
 
-The third milestone adds `Builder kind`, a pure value for incremental
-construction. It stores pending elements in reverse source order, their cached
-count, and a stack of open node kinds and starting positions. A `Checkpoint`
-records a position in this pending forest, counting elements rather than bytes.
-`startNode` opens a node at the current end. `emitToken` appends exact text.
-`emitElement` appends an existing green element and reuses its cached length.
+Rowan's builder asserts on misuse. Graft's pure builder returns
+`Either BuilderError` from every operation that can fail, and `runBuilder`
+checks that every node was closed and that exactly one root node remains. The
+`Build` monad threads the builder and the errors, and its `buildNode` and
+`buildNodeAt` bracket a node so that it can't be left open. `saveBuilder` and
+`restoreBuilder` give backtracking parsers the persistence of the pure builder.
 
-`finishNode` removes the pending suffix belonging to the innermost node. It
-reverses that suffix into source order, constructs the node, and replaces the
-suffix with one pending element. Descendants need no traversal. The builder
-uses ordinary lists and values, with no mutation or interning. Keeping an old
-builder allows independent construction branches, while retaining its pending
-trees and open node stack.
+## Typed views
 
-`startNodeAt` opens a node at a checkpoint. It includes the elements already
-emitted after that position and further elements emitted before the node closes.
-This supports delayed wrapping when a parser recognizes an operator after
-emitting its left operand. Repeated wrapping at the same position supports
-left-associative expressions. A marker at the end can start an empty node.
+`AstNode` and `AstToken` are classes for application-defined views. A view is
+usually a newtype over a cursor with a fallible cast; it adds typed accessors
+without building a second tree, so every view keeps its exact text, trivia,
+range and context. Each class has an associated kind type, replacing Rowan's
+language parameter.
 
-Graft follows Rowan's positional validation: the marker cannot exceed the
-pending count or precede the innermost open node. It records no ownership or
-history. Closing a node collapses positions. Later emissions can make an old
-position valid again, and an unrelated builder's marker can pass the same tests.
-Applications must use checkpoints with their corresponding construction history.
+A cast checks the element's form and kind, not the grammar. A view of an
+expression with a missing operand still exists, and its accessor for that
+operand returns `Nothing`. Required fields, duplicates and token spelling are
+the application's to check. The classes have laws (a cast keeps the cursor,
+and casting a view's syntax succeeds again) that the type system can't
+enforce; `matchNode` and `matchToken` implement the usual instance.
 
-Errors use `Either BuilderError`, replacing Rowan's assertions. `finishNode`
-rejects a builder with no open node. `runBuilder` first rejects unclosed
-nodes, then requires exactly one completed root node. This explicit balance
-check is stricter than Rowan's final forest check. Finishing never closes nodes
-implicitly, and a failed operation leaves the input value available.
+`examples/ExactUpdate.hs` uses views for a semantic update: it reads a number's
+value, keeps the original token when the value is unchanged, so `001` stays
+`001`, and otherwise replaces only that token.
 
-Opening nodes, marking positions, and appending existing elements take constant
-time. Closing a node costs a traversal of its immediate children. Token creation
-has the constant cost of `greenToken`. Finishing checks the open stack
-to report its depth. Saved builders retain their earlier construction state,
-so clients can release old values when branching is no longer needed.
+## Line and column positions
 
-## Typed AST views and semantic updates
+`Graft.LineIndex` records where each line starts in a text and converts byte
+offsets to and from zero-based lines and columns. Columns can be counted in
+UTF-8 bytes or in UTF-16 code units, the Language Server Protocol's default.
+Lines end at `\n`, `\r\n` or a lone `\r`, as in that protocol, and columns past
+the end of a line clamp to it. An index describes one text and must be rebuilt
+after an edit.
 
-The fifth milestone adds `AstNode` and `AstToken`, Haskell type classes for
-application-defined views over node and token occurrences. Each class associates
-a view with the application's existing syntax-kind type. A view is usually a
-newtype around a cursor, with a fallible cast and a syntax accessor. This retains
-concrete text, trivia, paths, byte ranges, and the original snapshot without
-constructing a separate semantic tree.
+## Testing
 
-`matchNode` and `matchToken` check element form and a kind predicate, then pass
-the unchanged cursor to the application's wrapper. Instances must reject the
-opposite form. A successful cast must retain the exact occurrence and snapshot,
-and casting the resulting view's syntax must succeed again. These are instance
-laws, not properties that Haskell's type system enforces. Private constructors
-and the supplied helpers support the usual implementation.
+The tests compare the library with independent models that share none of its
+code; [CONTRIBUTING.md](../CONTRIBUTING.md) describes them. The benchmark suite
+and its latest results are in [performance.md](performance.md).
 
-Typed fields select matching immediate node or token children in source order.
-They do not search grandchildren. List results are lazy, and first-match queries
-stop at the first successful cast. `astParent` casts only the immediate parent.
-`astAncestors` returns matching ancestors nearest first, excluding the focus.
-Empty tokens remain visible, and repeated shared green values retain distinct
-paths and ranges. A view retains its ancestors and therefore its original root.
+## Relation to Rowan
 
-Casting checks a view's admissibility, not a grammar. An expression with missing
-operands can still have an expression view. Field accessors return optional
-values or lists, leaving required fields, duplicate handling, and token spelling
-validation to the application. No parser or lexer belongs to this layer.
+Graft started from a study of Rowan at revision
+`b6f1cb6494a99a2264186d110b1b170989774814` (version 0.17.0), retrieved on
+10 October 2026. The sources studied were [green nodes][node] and
+[tokens][token], [cursors][cursor], [AST support][ast], the [builder][builder]
+and [node cache][node-cache], and Rowan's [green][green], [text][syntax-text]
+and [formatting][tidy] tests.
 
-The application example `examples/ExactUpdate.hs` reads an integer from a typed
-number token. Its setter retains the original token when the value is unchanged,
-including the spelling `001`. A changed value uses a new number token and
-rebuilds ancestors through the retained cursor. Surrounding spacing, comment,
-and CRLF spelling remain exact. Missing fields or invalid numeric text return
-no update. This is one explicit semantic policy, not a general bidirectional
-update protocol supplied by Graft.
+| Rowan | Graft |
+| --- | --- |
+| Reference-counted thin allocations | Ordinary values managed by the garbage collector |
+| `u16` syntax kinds and a language trait | A type parameter for the application's own kind type |
+| `TextSize`, a `u32` byte count | `TextLength`, a newtype over `Int` |
+| Children with cached relative offsets | The same, in a `SmallArray` and a `PrimArray` |
+| Leading and trailing trivia on tokens | Trivia as ordinary tokens |
+| Separate node and token cursors, optionally mutable | One immutable cursor type; edits return a new cursor |
+| Mutable builder that asserts on misuse | Pure builder with structured errors, and a `Build` monad |
+| Node cache for interning | No interning |
+| `AstNode` trait, `AstChildren` iterator, `SyntaxNodePtr` | `AstNode` and `AstToken` classes and lazy lists; no location pointers |
 
-Rowan's node trait and Graft's node class both supply typed syntax wrappers.
-Graft directly associates views with kind types, without Rowan's language-tag
-conversion, and adds a corresponding token class. Lazy lists replace a dedicated
-typed-child iterator. Match helpers check form in addition to kind because
-Graft uses one cursor type for nodes and tokens. There is no separate kind-only
-cast query or equivalent of Rowan's location-based syntax/AST pointers yet.
-Location handles need a design that addresses ambiguous empty and nested ranges.
+## Open questions
 
-The usual newtype cast requires no tree traversal beyond the supplied predicate.
-Typed navigation scans candidate child lists or ancestor chains, with work
-determined by the user's cast implementation. Views perform no copying or
-normalization of source text. The baseline measures Graft only. It establishes
-no allocation or runtime equivalence with Rowan.
-
-## Performance baseline
-
-The sixth milestone records two benchmark passes over 89 cases, using GHC
-9.12.2 with optimisation. Cases cover ASCII and Unicode token construction,
-wide nodes, deep unary trees, and a document with 1,000 line nodes and five
-tokens per line. Widths and depths reach 10,000. Prepared trees are fully
-evaluated before timing. Result consumers force rendered text, cached lengths,
-or sums of visited source ranges. Edited roots need no traversal of reused
-descendants to establish their caches.
-
-At 10,000 children, first-child lookup takes about 40 nanoseconds, while
-last-child lookup takes 210–218 microseconds. Replacing the first child takes
-50–60 microseconds because the new root still sums every child cache.
-These measurements identify wide navigation and ancestor reconstruction as
-candidates for controlled experiments. They do not select a new layout.
-
-Separate processes measure live heap after full garbage collection.
-A kibibyte is 1,024 bytes, and a mebibyte is 1,048,576 bytes.
-For 10,000 lines, retaining the latest edited root uses about 5.6 mebibytes,
-while retaining the original and 100 edited roots uses 17.1 mebibytes.
-A middle token cursor retains about 5.7 mebibytes. Retaining only its green
-token uses about 32 kibibytes. These totals subtract startup live memory but include fixture
-and runtime overhead.
-
-The measurement host uses an Intel Xeon w3-2435 with one selected CPU and
-a powersave governor. Some cases reach the three-second timing limit before
-meeting the requested precision. Results support broad cost comparisons, not
-fine rankings. [`docs/performance.md`](performance.md) records the environment,
-raw CSV files, uncertainty, method, and conclusions.
-[`bench/README.md`](../bench/README.md) gives reproduction commands. This
-baseline supplies no duplicate-rate evidence that establishes a need for
-interning, and it makes no speed or memory comparison with Rowan.
-
-## Evidence and upstream study
-
-The first milestone tests rendering and byte counts against an independent model
-tree, verifies every cache, checks the exact changed source span, and checks
-unaffected branches. Generated text includes Unicode scalar values, combining
-characters, CRLF, and NUL. Coverage checks exercise nested edits and node/token
-targets and replacements. Regressions cover empty values and a shared graph
-whose logical length exceeds a machine word.
-
-Cursor properties compare every occurrence and range with the independent model,
-check parent/sibling round trips and token ordering, and verify unaffected ranges
-after replacements grow or shrink. Scoped offset lookup and covering queries are
-checked against model positions. Explicit cases cover tokenless nodes, empty
-tokens, multibyte interiors, shared-boundary ambiguity, EOF, repeated shared
-subtrees at distinct offsets, and lookup in a shared graph beyond machine-word
-length without rendering it.
-
-Builder properties stream start, token, and finish events from an independent
-tree model. They compare shape, exact source, and every cached byte length.
-Generated cases check retroactive and repeated wrapping, emissions after opening
-a wrapper, independent builder branches, reuse of existing elements, checkpoint
-bounds, and balance at every close. Regressions cover invalid root shapes,
-empty construction, top-level wrapping, markers from unrelated builders, revived
-positions, and reuse of large shared trees without rendering them.
-
-Child-edit properties share the green and cursor tests' independent model.
-They compare shape, exact source, all caches, and every new occurrence range.
-Untouched occurrences are checked at their shifted paths. Properties also cover
-direct/path/focus agreement, insertion/removal inverses, empty and identity
-splices, validation order, invalid paths, and token targets. Regressions cover
-empty elements, retained trivia, Unicode, extreme indices, and large cached
-lengths without rendering shared trees.
-
-Typed-view properties compare casts and syntax round trips with model occurrences,
-including their green focus, root, path, and byte range. They check immediate
-node/token fields, parent and ancestor filtering, token replacement, and child
-insertion through typed views. New trees are checked against independent source
-and range oracles. Regressions cover incomplete fields, opposite forms with the
-same kind, shared occurrences, first-match laziness, and large cached ranges.
-
-The implementation study used Rowan revision
-`b6f1cb6494a99a2264186d110b1b170989774814`, retrieved on 10 October 2026;
-its manifest identifies version 0.17.0. The inspected sources were:
-
-- [Green nodes][node] and [tokens][token]: lengths, child storage,
-  rendering, trivia, and green child insertion/removal/splicing.
-- [Cursors][cursor]: contextual navigation and replacement through ancestors.
-- [AST support][ast]: the node trait, typed child filtering, and location-based
-  syntax and AST pointers.
-- [Builders][builder] and [cache][node-cache]: the pending forest, open-node
-  stack, checkpoint validation, suffix wrapping, and interning.
-- [Green tests][green], [text tests][syntax-text], and
-  [formatting test][tidy]. Green tests concern Rust thread traits and sizes;
-  text tests exercise empty and differently chunked strings. The README also
-  points to rust-analyzer integration tests.
+- Interning: whether a node cache pays for itself depends on duplicate rates in
+  real parser output, which haven't been measured.
+- Location handles: an equivalent of Rowan's `SyntaxNodePtr`, which finds an
+  element again in a new version of the tree, needs rules for empty and nested
+  elements that share a range.
+- Trivia ownership, and how close to Rowan's API Graft should stay.
+- Incremental reparsing: Graft can splice a reparsed subtree into a tree, but
+  has no support for deciding which subtree to reparse after a text edit.
 
 [node]: https://github.com/rust-analyzer/rowan/blob/b6f1cb6494a99a2264186d110b1b170989774814/src/green/node.rs
 [token]: https://github.com/rust-analyzer/rowan/blob/b6f1cb6494a99a2264186d110b1b170989774814/src/green/token.rs
@@ -334,17 +208,3 @@ its manifest identifies version 0.17.0. The inspected sources were:
 [green]: https://github.com/rust-analyzer/rowan/blob/b6f1cb6494a99a2264186d110b1b170989774814/src/green.rs
 [syntax-text]: https://github.com/rust-analyzer/rowan/blob/b6f1cb6494a99a2264186d110b1b170989774814/src/syntax_text.rs
 [tidy]: https://github.com/rust-analyzer/rowan/blob/b6f1cb6494a99a2264186d110b1b170989774814/tests/tidy.rs
-
-## Remaining work
-
-- Use the measured baseline for focused experiments on wide child navigation
-  and ancestor reconstruction, before choosing interning, vectors, additional
-  offset caches, or other layouts.
-- Location handles and occurrence tracking across snapshots.
-- Explicit trivia ownership and the desired Rowan compatibility boundary.
-
-General bidirectional semantic updates still need an application correspondence
-between semantic values and concrete syntax. Typed views expose the retained
-syntax, and persistent edits reconstruct roots. They cannot decide where new
-comments belong, which spelling to prefer, or how to reconcile every changed
-semantic value with retained syntax.

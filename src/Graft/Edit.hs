@@ -1,10 +1,17 @@
--- | Persistent element replacement, child splicing and path lookup.
+-- | Persistent edits to green trees, selecting elements by child path. Each
+-- edit returns a new tree and leaves the original usable; untouched subtrees
+-- are shared between the two.
+--
+-- To make several edits in one region, or to edit what you found by
+-- navigating, edit through a cursor instead ("Graft.Cursor").
 module Graft.Edit
-  ( Path
+  ( -- * Paths
+    Path
   , PathError (..)
   , elementAt
   , replaceAt
   , replaceChild
+    -- * Child splicing
   , ChildEditError (..)
   , spliceChildren
   , insertChild
@@ -99,10 +106,10 @@ instance NFData ChildEditError where
 --
 -- Validation checks negative start, negative end, reversed range, start bounds,
 -- then end bounds, in that order. Invalid input returns no partial result.
--- Untouched elements and the following list suffix are reused. Cost is a
--- traversal of immediate children and replacements to establish the new cache;
--- descendant text is not traversed. Inputs must be finite, as for 'greenNode'.
--- Offsets of the following children are shifted rather than recomputed.
+-- Untouched children are reused. Cost is proportional to the number of
+-- children plus replacements: the child array is copied and the offsets of
+-- following children are shifted. Descendant text is not traversed. The
+-- replacement list must be finite.
 spliceChildren
   :: Int -> Int -> [GreenElement kind] -> GreenNode kind
   -> Either ChildEditError (GreenNode kind)
@@ -124,8 +131,7 @@ insertChild index element = spliceChildren index index [element]
 
 -- | Remove one existing immediate child. Unlike insertion, the child count
 -- is out of bounds. Negative indices return 'NegativeChildBoundary'; a missing
--- child returns 'ChildBoundaryOutOfBounds'. Validation never adds one to the
--- index, so even @maxBound :: Int@ cannot overflow. Retains the node's kind
+-- child returns 'ChildBoundaryOutOfBounds'. Retains the node's kind
 -- and follows the same sharing and cache rules as 'spliceChildren'.
 removeChild :: Int -> GreenNode kind -> Either ChildEditError (GreenNode kind)
 removeChild index node

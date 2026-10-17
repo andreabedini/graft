@@ -20,7 +20,7 @@ graft_bench=$(cabal list-bin bench:graft-bench --enable-benchmarks -O2)
 Run two passes and save the raw data in a new directory:
 
 ```sh
-python3 bench/run.py --output /tmp/graft-benchmark --runs 2 --timeout 3s --stdev 2
+python3 bench/run.py --output bench/results/"$(date +%F)" --runs 2 --timeout 3s --stdev 2
 ```
 
 If Linux permits CPU 2 in your process's affinity, add `--cpu 2` to pin each
@@ -47,7 +47,7 @@ Inspect or filter individual timing cases:
 Compare a new run with an earlier CSV file on the same machine:
 
 ```sh
-"$graft_bench" --baseline /tmp/graft-benchmark/timing-1.csv --timeout 3s --stdev 2 +RTS -T -A32m -RTS
+"$graft_bench" --baseline bench/results/2026-10-17/timing-1.csv --timeout 3s --stdev 2 +RTS -T -A32m -RTS
 ```
 
 Measure a specific retention policy:

@@ -55,15 +55,19 @@ newtype TextLength = TextLength Int
 textLengthOf :: Text -> TextLength
 textLengthOf = TextLength . Text.lengthWord8
 
--- | An internal node: its kind, its cached total length, its children in
--- source order, and the start of each child relative to the node.
+-- | An interior node with a kind, children in source order, and cached
+-- lengths. Construct one with 'greenNode'; its representation stores the
+-- total length, the children in an array, and the start of each child
+-- relative to the node, so child access and offset lookup take constant time.
 data GreenNode kind = GreenNode
   !kind
   !TextLength
   !(SmallArray (GreenElement kind))
   !(PrimArray Int)
 
--- | A leaf: its kind, its cached UTF-8 byte length and its exact text.
+-- | A leaf with a kind and exact Unicode text, which may be empty, together
+-- with its cached UTF-8 byte length. Construct one with 'greenToken'. No
+-- normalization is performed.
 data GreenToken kind = GreenToken !kind !TextLength {-# UNPACK #-} !Text
   deriving (Eq)
 
@@ -101,8 +105,10 @@ instance Show kind => Show (GreenToken kind) where
   showsPrec precedence (GreenToken kind _ text) = showParen (precedence > 10) $
     showString "greenToken " . showsPrec 11 kind . showChar ' ' . showsPrec 11 text
 
--- | Construct a node from children in source order, establishing its cached
--- length and child offsets in one pass over the immediate children.
+-- | Construct a node from children in source order. Takes time proportional
+-- to the number of children, reading their cached lengths without rendering
+-- them; the child values are reused, not copied. An empty list is allowed.
+-- The list must be finite.
 greenNode :: kind -> [GreenElement kind] -> GreenNode kind
 greenNode kind children = runST $ do
   let count = length children
