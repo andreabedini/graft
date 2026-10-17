@@ -93,7 +93,7 @@ buffer sized from the cached length.
 | Deep: descend to the leaf | 475–511 | 267–269 |
 | Deep: render three bytes | 192–207 | 42.5–43.2 |
 | Deep: offset lookup | 1,237–1,384 | 590–605 |
-| Deep: replace by path | 795–990 | 790–797 |
+| Deep: replace at a path (descend, replace, rebuild) | 795–990 | 790–797 |
 | Deep: replace through a prepared cursor | 398–419 | 170–171 |
 | Deep: prepared cursor to root | 75.2–186 | 22.9–23.0 |
 | Chain: all tokens | — | 1,769–1,824 |

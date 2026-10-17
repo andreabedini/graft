@@ -119,8 +119,8 @@ propChildReplacement children new =
   let node = greenNode Root (map compile children)
   in forAll (chooseInt (-1, length children)) $ \i ->
       let expected
-            | i < 0 = Left (NegativeChildIndex i)
-            | i >= length children = Left (ChildIndexOutOfBounds i)
+            | i < 0 = Left (NegativeChildBoundary i)
+            | i >= length children = Left (ChildBoundaryOutOfBounds i)
             | otherwise = Right (compile (Branch Root
                 (take i children ++ [new] ++ drop (i + 1) children)))
       in (Node <$> replaceChild i (compile new) node) === expected
@@ -462,7 +462,7 @@ regressions = once $ conjoin
   , nodeKind original === Root
   , elementKind (tok "x") === Name
   , fmap renderElement (replaceAt [] (tok "new") (Node original)) === Right "new"
-  , replaceChild maxBound (tok "x") empty === Left (ChildIndexOutOfBounds maxBound)
+  , replaceChild maxBound (tok "x") empty === Left (ChildBoundaryOutOfBounds maxBound)
   ]
   where
     empty = greenNode Root []

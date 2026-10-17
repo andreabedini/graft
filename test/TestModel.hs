@@ -1,12 +1,14 @@
 module TestModel
   ( Kind (..), Model (..), scalar, genChar, genText, genKind, genModel
   , compile, source, byteLength, validCaches, contexts, hugeDepth
+  , PathEditError (..), elementAt, replaceAt, spliceChildrenAt, insertChildAt, removeChildAt
   ) where
 
 import Data.Bits (finiteBitSize)
 import Data.Char (chr, ord)
 import qualified Data.Text as Text
-import Graft.Edit (Path)
+import Graft.Cursor
+import Graft.Edit
 import Graft.Green
 import Test.QuickCheck
 
@@ -94,3 +96,32 @@ contexts model = ([], "", model, "") : case model of
     , let after = drop (i + 1) children
     ]
 
+
+-- Edits by path, written with cursors as applications write them. The
+-- properties state their expectations in terms of paths.
+elementAt :: Path -> GreenElement k -> Either PathError (GreenElement k)
+elementAt path root = cursorGreen <$> cursorAt path (rootCursor root)
+
+replaceAt :: Path -> GreenElement k -> GreenElement k -> Either PathError (GreenElement k)
+replaceAt path replacement root =
+  cursorTree . replaceFocus replacement <$> cursorAt path (rootCursor root)
+
+data PathEditError = ChildEditPathError PathError | EditError ChildEditError
+  deriving (Eq, Show)
+
+editAt
+  :: (Cursor k -> Either ChildEditError (Cursor k))
+  -> Path -> GreenElement k -> Either PathEditError (GreenElement k)
+editAt edit path root = case cursorAt path (rootCursor root) of
+  Left err -> Left (ChildEditPathError err)
+  Right focus -> either (Left . EditError) (Right . cursorTree) (edit focus)
+
+spliceChildrenAt
+  :: Path -> Int -> Int -> [GreenElement k] -> GreenElement k -> Either PathEditError (GreenElement k)
+spliceChildrenAt path start end replacements = editAt (spliceChildrenFocus start end replacements) path
+
+insertChildAt :: Path -> Int -> GreenElement k -> GreenElement k -> Either PathEditError (GreenElement k)
+insertChildAt path index element = editAt (insertChildFocus index element) path
+
+removeChildAt :: Path -> Int -> GreenElement k -> Either PathEditError (GreenElement k)
+removeChildAt path index = editAt (removeChildFocus index) path

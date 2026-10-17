@@ -150,14 +150,16 @@ editMany :: Int -> Path -> GreenElement Kind -> GreenElement Kind
 editMany count path root = List.foldl' step root [1 .. count]
   where
     step previous index =
-      let updated = checked (replaceAt path (Token (greenToken Number (Text.pack (show index)))) previous)
+      let updated = cursorTree (replaceFocus (Token (greenToken Number (Text.pack (show index))))
+            (checked (cursorAt path (rootCursor previous))))
       in elementTextLength updated `seq` updated
 
 snapshots :: Int -> Path -> GreenElement Kind -> [GreenElement Kind]
 snapshots count path root = scanl step root [1 .. count]
   where
     step previous index =
-      let updated = checked (replaceAt path (Token (greenToken Number (Text.pack (show index)))) previous)
+      let updated = cursorTree (replaceFocus (Token (greenToken Number (Text.pack (show index))))
+            (checked (cursorAt path (rootCursor previous))))
       in elementTextLength updated `seq` updated
 
 -- Independent source checks guard the workload, not timing thresholds.

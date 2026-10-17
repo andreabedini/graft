@@ -31,6 +31,8 @@ module Graft.Cursor
   , cursorRange
   , cursorText
   , cursorPath
+  , Path
+  , PathError (..)
     -- * Navigation
   , cursorRoot
   , cursorAt
@@ -68,11 +70,33 @@ module Graft.Cursor
 import Control.Applicative ((<|>))
 import Control.DeepSeq (NFData (..))
 import Data.Text (Text)
-import Graft.Edit (ChildEditError (..), Path, PathError (..))
+import Control.Exception (Exception)
+import Graft.Edit (ChildEditError (..))
 import qualified Graft.Edit as Edit
 import Graft.Green
 import Graft.Green.Internal (childAt, childCount, childStart, firstChildEndingAtOrAfter, setChild)
 import Graft.Range
+
+-- | The zero-based index of a child at each level, from the root down. Every
+-- child counts, tokens included, and @[]@ is the root itself. A path belongs
+-- to one version of a tree: inserting or removing children shifts the paths
+-- that follow.
+type Path = [Int]
+
+-- | Why a path doesn't lead to an element, reported for the first step that
+-- fails. The index is the one at that step.
+data PathError
+  = NegativeChildIndex Int
+  | ChildIndexOutOfBounds Int
+  | CannotDescendIntoToken
+  deriving (Eq, Show)
+
+instance Exception PathError
+
+instance NFData PathError where
+  rnf (NegativeChildIndex _) = ()
+  rnf (ChildIndexOutOfBounds _) = ()
+  rnf CannotDescendIntoToken = ()
 
 -- The context of a focus: its parent as last rebuilt, the parent's absolute
 -- offset, whether the parent differs from the child stored at its own index
@@ -152,7 +176,7 @@ cursorRoot (Cursor focus _ edited (Crumb parent start parentEdited above index))
       climb (rebuilt nodeEdited position (Node node) grandparent) offset
         (nodeEdited || grandparentEdited) context
 
--- | Follow a path down from the focus, failing as 'Graft.Edit.elementAt' does.
+-- | Follow a path down from the focus. The first step that fails is reported.
 cursorAt :: Path -> Cursor kind -> Either PathError (Cursor kind)
 cursorAt [] cursor = Right cursor
 cursorAt (index : rest) cursor = cursorChildAt index cursor >>= cursorAt rest

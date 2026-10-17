@@ -2,6 +2,7 @@
 
 module ChildEditTests (childEditProperties) where
 
+import Data.Bifunctor (bimap)
 import Data.List (isPrefixOf)
 import qualified Data.Text as Text
 import Graft
@@ -30,7 +31,7 @@ modelReplace (index : rest) replacement (Branch kind items) =
     ++ drop (index + 1) items)
 modelReplace _ _ (Leaf _ _) = error "invalid oracle path"
 
-matches :: Model -> Either ChildEditError (GreenElement Kind) -> Property
+matches :: Show err => Model -> Either err (GreenElement Kind) -> Property
 matches expected result = case result of
   Left err -> counterexample (show err) False
   Right edited -> conjoin
@@ -89,7 +90,7 @@ propNestedSplice = forAll (genTarget False) $ \(model, path, kind, items) ->
       Left err -> counterexample (show err) False
       Right focus -> conjoin
         [ matches expected edited
-        , fmap cursorTree (spliceChildrenFocus start end (map compile replacements) focus) === edited
+        , bimap EditError cursorTree (spliceChildrenFocus start end (map compile replacements) focus) === edited
         , fmap cursorPath (spliceChildrenFocus start end (map compile replacements) focus) === Right path
         , cursorGreen (cursorRoot focus) === root
         , cursorPath focus === path
@@ -122,7 +123,7 @@ propInsertion = forAll (genTarget False) $ \(model, path, kind, items) ->
         , (edited >>= removeChildAt path index) === Right root
         , case cursorAt path (rootCursor root) of
             Left err -> counterexample (show err) False
-            Right focus -> fmap cursorTree (insertChildFocus index element focus) === edited
+            Right focus -> bimap EditError cursorTree (insertChildFocus index element focus) === edited
         ]
 
 propRemoval :: Property
@@ -139,7 +140,7 @@ propRemoval = forAll (genTarget True) $ \(model, path, kind, items) ->
       , (direct >>= insertChild index (compile (items !! index))) === Right (asNode target)
       , case cursorAt path (rootCursor root) of
           Left err -> counterexample (show err) False
-          Right focus -> fmap cursorTree (removeChildFocus index focus) === edited
+          Right focus -> bimap EditError cursorTree (removeChildFocus index focus) === edited
       ]
 
 propNoOp :: Property
@@ -166,7 +167,7 @@ propInvalidBounds = forAll (genTarget False) $ \(model, path, kind, items) ->
   in conjoin $
     [ conjoin
         [ spliceChildren start end [] node === Left err
-        , spliceChildrenAt path start end [] root === Left err
+        , spliceChildrenAt path start end [] root === Left (EditError err)
         , case cursorAt path (rootCursor root) of
             Left pathErr -> counterexample (show pathErr) False
             Right focus -> fmap cursorTree (spliceChildrenFocus start end [] focus) === Left err
@@ -183,9 +184,9 @@ propInvalidTargets :: Model -> Property
 propInvalidTargets model = conjoin
   [ case selected of
       Leaf _ _ -> conjoin
-        [ spliceChildrenAt path (-1) (-2) [] root === Left CannotEditTokenChildren
-        , insertChildAt path (-1) root root === Left CannotEditTokenChildren
-        , removeChildAt path (-1) root === Left CannotEditTokenChildren
+        [ spliceChildrenAt path (-1) (-2) [] root === Left (EditError CannotEditTokenChildren)
+        , insertChildAt path (-1) root root === Left (EditError CannotEditTokenChildren)
+        , removeChildAt path (-1) root === Left (EditError CannotEditTokenChildren)
         , case cursorAt path (rootCursor root) of
             Left err -> counterexample (show err) False
             Right focus -> conjoin

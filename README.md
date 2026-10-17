@@ -71,8 +71,9 @@ The double space, the comment and the CRLF line ending survive the edit.
   operator-precedence parser needs to.
 - **Typed views** (`Graft.Ast`) are newtypes over cursors that give your
   grammar's nodes typed accessors, without building a separate AST.
-- **Edits by path** (`Graft.Edit`) and **byte ranges** (`Graft.Range`) work on
-  green trees directly.
+- **Child edits** (`Graft.Edit`) replace, insert and remove the children of a
+  green node; to edit inside a tree, go through a cursor. **Byte ranges**
+  (`Graft.Range`) describe where things are.
 - **Line index** (`Graft.LineIndex`) converts byte offsets to and from line and
   column positions, including the UTF-16 columns used by the Language Server
   Protocol.

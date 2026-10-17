@@ -49,7 +49,8 @@ wideBench size = bgroup (show size)
           root = rootCursor tree
           replacement = Token (greenToken Number (Text.singleton '2'))
           endAt index input = cursorEnd (checked (cursorChildAt index (rootCursor input)))
-          replace index input = elementTextLength (checked (replaceAt [index] replacement input))
+          replace index input = elementTextLength (cursorTree (replaceFocus replacement
+            (checked (cursorChildAt index (rootCursor input)))))
       in bgroup "prepared"
         [ bench "render" $ nf renderElement tree
         , bench "builder-reuse" $ whnf (cached . buildReuse) node
@@ -87,7 +88,8 @@ deepBench depth = bgroup (show depth)
       in bgroup "prepared"
         [ bench "render" $ nf renderElement tree
         , bench "descend" $ whnf (cursorEnd . focused) tree
-        , bench "replace-path" $ whnf (elementTextLength . checked . replaceAt path replacement) tree
+        , bench "replace-path" $ whnf (elementTextLength . cursorTree . replaceFocus replacement
+            . checked . (`cursorAt` rootCursor tree)) path
         , bench "offset" $ whnf (offsetEnd 1 . rootCursor) tree
         , bench "focus-and-replace" $ whnf (elementTextLength . cursorTree . replaceFocus replacement . focused) tree
         ]
