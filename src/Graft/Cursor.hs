@@ -1,19 +1,37 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveTraversable #-}
 
--- | An immutable red-tree zipper over green elements. A cursor denotes an
--- occurrence in one tree snapshot, with parents, siblings and absolute offsets.
--- Edits through a cursor return a cursor on the edited snapshot, so a series
--- of edits can continue navigating; old cursors keep their snapshots.
--- No pointer identity is exposed.
+-- | Cursors: immutable zippers over green trees. A cursor focuses one
+-- occurrence of a node or token and knows its parents, siblings and absolute
+-- byte range.
+--
+-- Edits through a cursor return a cursor on the edited tree, at the same
+-- path, so a series of edits can keep navigating. Ancestors are rebuilt
+-- lazily as the cursor moves up or sideways, and 'cursorTree' returns the
+-- whole edited tree. Old cursors keep seeing the tree they were made from.
+--
+-- > -- Replace the text of every Name token, in one pass through one cursor.
+-- > renameAll :: Text -> GreenElement Kind -> GreenElement Kind
+-- > renameAll name root = maybe root (cursorTree . go) (cursorFirstToken (rootCursor root))
+-- >   where
+-- >     go cursor = maybe renamed go (cursorNextToken renamed)
+-- >       where
+-- >         renamed
+-- >           | cursorKind cursor == Name = replaceFocus (Token (greenToken Name name)) cursor
+-- >           | otherwise = cursor
+--
+-- Cursors have no equality of occurrences and expose no pointer identity;
+-- compare 'cursorPath's within one tree instead.
 module Graft.Cursor
-  ( Cursor
+  ( -- * Cursors
+    Cursor
   , rootCursor
   , cursorGreen
   , cursorKind
   , cursorRange
   , cursorText
   , cursorPath
+    -- * Navigation
   , cursorRoot
   , cursorAt
   , cursorParent
@@ -22,19 +40,23 @@ module Graft.Cursor
   , cursorLastChild
   , cursorNextSibling
   , cursorPreviousSibling
+    -- * Traversal
   , cursorChildren
   , cursorAncestors
   , cursorDescendants
   , WalkEvent (..)
   , cursorWalk
+    -- * Tokens
   , cursorTokens
   , cursorFirstToken
   , cursorLastToken
   , cursorNextToken
   , cursorPreviousToken
+    -- * Lookup by offset
   , TokenAtOffset (..)
   , tokenAtOffset
   , coveringElement
+    -- * Editing
   , replaceFocus
   , modifyFocus
   , cursorTree
@@ -83,7 +105,7 @@ instance Show kind => Show (Cursor kind) where
 rootCursor :: GreenElement kind -> Cursor kind
 rootCursor green = Cursor green 0 False Top
 
--- | The original green element at the focus, without copying it.
+-- | The green element at the focus, without copying it.
 cursorGreen :: Cursor kind -> GreenElement kind
 cursorGreen (Cursor green _ _ _) = green
 
@@ -114,6 +136,7 @@ cursorParent (Cursor _ _ _ Top) = Nothing
 cursorParent (Cursor focus _ edited (Crumb parent start parentEdited above index)) =
   Just (Cursor (Node (rebuilt edited index focus parent)) start (edited || parentEdited) above)
 
+{-# INLINE rebuilt #-}
 rebuilt :: Bool -> Int -> GreenElement kind -> GreenNode kind -> GreenNode kind
 rebuilt edited index focus parent
   | edited = setChild index focus parent
@@ -121,7 +144,14 @@ rebuilt edited index focus parent
 
 -- | Ascend to the snapshot's root, rebuilding only ancestors of replaced foci.
 cursorRoot :: Cursor kind -> Cursor kind
-cursorRoot cursor = maybe cursor cursorRoot (cursorParent cursor)
+cursorRoot cursor@(Cursor _ _ _ Top) = cursor
+cursorRoot (Cursor focus _ edited (Crumb parent start parentEdited above index)) =
+  climb (rebuilt edited index focus parent) start (edited || parentEdited) above
+  where
+    climb !node !offset !nodeEdited Top = Cursor (Node node) offset nodeEdited Top
+    climb !node _ !nodeEdited (Crumb grandparent offset grandparentEdited context position) =
+      climb (rebuilt nodeEdited position (Node node) grandparent) offset
+        (nodeEdited || grandparentEdited) context
 
 -- | Follow a path relative to the current focus. Validation matches
 -- 'Graft.Edit.elementAt', including negative-index precedence.

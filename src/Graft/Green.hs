@@ -1,7 +1,10 @@
+{-# LANGUAGE BangPatterns #-}
+
 -- | Immutable syntax without parents or absolute source positions.
 --
 -- Supply every source fragment as token text, including whitespace and comments.
--- Nodes and tokens are abstract so callers cannot invalidate cached lengths.
+-- Nodes and tokens are abstract so callers cannot invalidate cached lengths;
+-- "Graft.Green.Internal" exposes the representation for code that needs it.
 -- Children must form finite, acyclic trees (shared subtrees are allowed).
 module Graft.Green
   ( GreenNode
@@ -26,7 +29,7 @@ module Graft.Green
   , renderElement
   ) where
 
-import Control.Monad.ST (runST)
+import Control.Monad.ST (ST, runST)
 import Data.Foldable (toList)
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -92,19 +95,27 @@ renderElement element
   | total == 0 = Text.empty
   | otherwise = runST $ do
       target <- Array.new bytes
-      let write (TextLength offset) (Token (GreenToken _ (TextLength len) (Text source start _))) =
-            Array.copyI len target offset source start
-          write offset (Node node) = go 0
-            where
-              count = childCount node
-              go index
-                | index == count = pure ()
-                | otherwise = do
-                    write (offset + childStart node index) (childAt node index)
-                    go (index + 1)
-      write 0 element
+      writeElement target 0 element
       result <- Array.unsafeFreeze target
       pure (Text result 0 bytes)
   where
     total = elementTextLength element
     bytes = fromIntegral total
+
+writeElement :: Array.MArray s -> Int -> GreenElement kind -> ST s ()
+writeElement target !offset (Token (GreenToken _ (TextLength len) (Text source start _))) =
+  Array.copyI len target offset source start
+writeElement target !offset (Node node) = writeChildren target offset node 0
+
+-- The last child is written by a tail call, so a chain of single-child nodes
+-- runs in constant stack.
+writeChildren :: Array.MArray s -> Int -> GreenNode kind -> Int -> ST s ()
+writeChildren target !offset node !index
+  | index >= count = pure ()
+  | index == count - 1 = writeElement target (childOffset index) (childAt node index)
+  | otherwise = do
+      writeElement target (childOffset index) (childAt node index)
+      writeChildren target offset node (index + 1)
+  where
+    count = childCount node
+    childOffset position = offset + fromIntegral (childStart node position)
