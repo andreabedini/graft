@@ -23,7 +23,6 @@ module Graft.Edit
 
 import Control.DeepSeq (NFData (..))
 import Control.Exception (Exception)
-import Data.Bifunctor (first)
 import Graft.Green
 import Graft.Green.Internal (childAt, childCount, setChild, spliceChildrenUnchecked)
 
@@ -142,7 +141,7 @@ removeChild index node
 -- | Splice the children of the node selected by a root-relative path and
 -- return a new root. An empty path selects the root node. Path validation
 -- precedes target validation (a token has no editable children), which precedes
--- boundary validation. Successful edits rebuild ancestors using 'replaceAt'.
+-- boundary validation. A successful edit rebuilds the ancestors on the path.
 -- Paths and byte offsets after the edited range can change in the new snapshot.
 spliceChildrenAt
   :: Path -> Int -> Int -> [GreenElement kind] -> GreenElement kind
@@ -167,13 +166,17 @@ removeChildAt path index = editNodeAt path (removeChild index)
 editNodeAt
   :: Path -> (GreenNode kind -> Either ChildEditError (GreenNode kind))
   -> GreenElement kind -> Either ChildEditError (GreenElement kind)
-editNodeAt path edit root = do
-  target <- first ChildEditPathError (elementAt path root)
-  case target of
-    Token _ -> Left CannotEditTokenChildren
-    Node node -> do
-      edited <- edit node
-      first ChildEditPathError (replaceAt path (Node edited) root)
+editNodeAt path edit = go path
+  where
+    go [] (Token _) = Left CannotEditTokenChildren
+    go [] (Node node) = Node <$> edit node
+    go (index : rest) element
+      | index < 0 = Left (ChildEditPathError (NegativeChildIndex index))
+      | otherwise = case element of
+          Token _ -> Left (ChildEditPathError CannotDescendIntoToken)
+          Node node
+            | index >= childCount node -> Left (ChildEditPathError (ChildIndexOutOfBounds index))
+            | otherwise -> (\child -> Node (setChild index child node)) <$> go rest (childAt node index)
 
 modifyChild
   :: Int

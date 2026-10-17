@@ -122,14 +122,18 @@ greenNode kind children = runST $ do
   total <- fill 0 0 children
   freeze kind total elements starts
 
--- | Construct a node from @count@ children supplied in reverse source order,
--- as a builder accumulates them. The list must have exactly @count@ elements.
-greenNodeReversed :: kind -> Int -> [GreenElement kind] -> GreenNode kind
+-- | Construct a node from the first @count@ elements of a list in reverse
+-- source order, as a builder accumulates them, and return the rest of the
+-- list. The list must have at least @count@ elements. The list is walked once.
+greenNodeReversed :: kind -> Int -> [GreenElement kind] -> (GreenNode kind, [GreenElement kind])
 greenNodeReversed kind count reversed = runST $ do
   elements <- newSmallArray count missingChild
-  let place !_ [] = pure ()
-      place !index (!child : rest) = writeSmallArray elements index child >> place (index - 1) rest
-  place (count - 1) reversed
+  let place !index rest
+        | index < 0 = pure rest
+        | otherwise = case rest of
+            [] -> error "Graft.Green.Internal.greenNodeReversed: too few elements"
+            !child : older -> writeSmallArray elements index child >> place (index - 1) older
+  remaining <- place (count - 1) reversed
   starts <- newPrimArray count
   let measure !index !offset
         | index == count = pure offset
@@ -138,7 +142,8 @@ greenNodeReversed kind count reversed = runST $ do
             writePrimArray starts index (bytes offset)
             measure (index + 1) (offset + elementTextLength child)
   total <- measure 0 0
-  freeze kind total elements starts
+  node <- freeze kind total elements starts
+  pure (node, remaining)
 
 freeze
   :: kind -> TextLength -> SmallMutableArray s (GreenElement kind) -> MutablePrimArray s Int

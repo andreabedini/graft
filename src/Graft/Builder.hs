@@ -147,10 +147,8 @@ emitElement !element (Builder count pending parents) =
 finishNode :: Builder kind -> Either BuilderError (Builder kind)
 finishNode (Builder _ _ []) = Left NoOpenNode
 finishNode (Builder count pending ((kind, start) : parents)) =
-  let size = count - start
-      (reversedChildren, before) = splitAt size pending
-      !node = greenNodeReversed kind size reversedChildren
-  in Right (Builder (start + 1) (Node node : before) parents)
+  case greenNodeReversed kind (count - start) pending of
+    (!node, before) -> Right (Builder (start + 1) (Node node : before) parents)
 
 -- | Mark the end of the pending forest in constant time. The marker can be
 -- retained while emitting tokens or completed nodes, then used for wrapping.
