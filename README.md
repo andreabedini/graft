@@ -87,10 +87,19 @@ for qualified import, as in the example: `Cursor.parent`, `Green.node`,
 `Range.start`. All offsets and lengths are `TextLength`, a count of UTF-8
 bytes, never characters.
 
+## Documentation
+
+The API documentation of the latest release is at
+<https://andreabedini.github.io/graft/>.
+
+Each [release](https://github.com/andreabedini/graft/releases) also has the
+documentation of every package with a library, as
+`PACKAGE-VERSION-docs.tar.gz`, in the format Hackage takes.
+
 ## Learn more
 
-- The [Haddock documentation](https://hackage.haskell.org/package/graft) covers
-  every function's contract, cost and edge cases.
+- The [API documentation](https://andreabedini.github.io/graft/) covers every
+  function's contract, cost and edge cases.
 - [`examples/ExactUpdate.hs`](https://github.com/andreabedini/graft/blob/main/examples/ExactUpdate.hs) uses typed views to
   change a number's value while keeping its spelling (`001` stays `001` if the
   value doesn't change).
