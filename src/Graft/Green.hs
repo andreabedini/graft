@@ -121,7 +121,8 @@ childCount = Internal.childCount
 childAt :: Int -> GreenNode kind -> Maybe (GreenElement kind)
 childAt index parent
   | index < 0 || index >= Internal.childCount parent = Nothing
-  | otherwise = Just (Internal.childAt parent index)
+  -- Read the element now, so the result doesn't keep the parent's array alive.
+  | otherwise = Just $! Internal.childAt parent index
 
 -- | The exact text of a token, as given to 'token'.
 text :: GreenToken kind -> Text
