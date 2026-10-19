@@ -95,17 +95,15 @@ type Path = [Int]
 -- | Why a path doesn't lead to an element, reported for the first step that
 -- fails. The index is the one at that step.
 data PathError
-  = NegativeChildIndex Int
-  | ChildIndexOutOfBounds Int
+  = NegativeChildIndex !Int
+  | ChildIndexOutOfBounds !Int
   | CannotDescendIntoToken
   deriving (Eq, Show)
 
 instance Exception PathError
 
 instance NFData PathError where
-  rnf (NegativeChildIndex _) = ()
-  rnf (ChildIndexOutOfBounds _) = ()
-  rnf CannotDescendIntoToken = ()
+  rnf err = err `seq` ()
 
 -- The context of a focus: its parent as last rebuilt, the parent's absolute
 -- offset, whether the parent differs from the child stored at its own index

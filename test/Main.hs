@@ -391,6 +391,16 @@ propRanges (NonNegative rawStart) (NonNegative rawLen) (NonNegative rawPoint) =
       , if len > 0 then Range.fromEnds (start + len) start === Nothing else property True
       ]
 
+-- Error values are strict in their positions, so forcing one, as rnf does,
+-- forces the positions it reports.
+strictErrors :: Property
+strictErrors = once $ conjoin
+  [ failsWith "undefined" (NegativeChildBoundary undefined)
+  , failsWith "undefined" (ReversedChildRange 1 undefined)
+  , failsWith "undefined" (ChildIndexOutOfBounds undefined)
+  , failsWith "undefined" (CheckpointOutOfBounds undefined 1)
+  ]
+
 -- Ranges that would break the start <= end invariant, or start before the
 -- text, are rejected rather than built.
 invalidRanges :: Property
@@ -543,6 +553,7 @@ main = do
     , run "covering range lookup" propCoveringRange
     , run "half-open range invariants" propRanges
     , run "invalid ranges are rejected" invalidRanges
+    , run "error values are strict in their positions" strictErrors
     , run "cursor empty, boundary, shared-occurrence and large-range regressions" cursorRegressions
     , run "length overflow fails instead of wrapping" lengthOverflow
     ] ++ [run title prop | (title, prop) <- builderProperties ++ childEditProperties ++ astProperties ++ lineIndexProperties]

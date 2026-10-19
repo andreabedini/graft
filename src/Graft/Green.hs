@@ -170,9 +170,9 @@ writeChildren target !offset parent !index
 -- reversed range).
 data ChildEditError
   = CannotEditTokenChildren
-  | NegativeChildBoundary Int
-  | ReversedChildRange Int Int
-  | ChildBoundaryOutOfBounds Int
+  | NegativeChildBoundary !Int
+  | ReversedChildRange !Int !Int
+  | ChildBoundaryOutOfBounds !Int
   deriving (Eq, Show)
 
 instance Exception ChildEditError

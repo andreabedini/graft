@@ -89,12 +89,12 @@ instance NFData Checkpoint where
 -- position, then the number of elements or the start of the current node.
 data BuilderError
   = NoOpenNode
-  | UnclosedNodes Int
+  | UnclosedNodes !Int
   | EmptyBuilder
-  | MultipleRoots Int
+  | MultipleRoots !Int
   | TokenRoot
-  | CheckpointOutOfBounds Int Int
-  | CheckpointBeforeCurrentNode Int Int
+  | CheckpointOutOfBounds !Int !Int
+  | CheckpointBeforeCurrentNode !Int !Int
   deriving (Eq, Show)
 
 instance Exception BuilderError
