@@ -6,7 +6,7 @@
 --
 -- A parser usually builds in the 'Graft.Build.Build' monad from
 -- "Graft.Build", which threads the builder and its errors and brackets each
--- node. Use 'Builder' directly when you want to keep builder states
+-- node. Use t'Builder' directly when you want to keep builder states
 -- around, for example to branch.
 --
 -- This module is meant to be imported qualified; its types are also

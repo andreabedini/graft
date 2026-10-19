@@ -24,7 +24,7 @@
 -- > parsed :: Either BuilderError (GreenNode Kind)
 -- > parsed = Build.exec (Build.node Root expression)
 --
--- 'Build' is a thin layer over the pure 'Builder' value from "Graft.Builder".
+-- t'Build' is a thin layer over the pure t'Builder' value from "Graft.Builder".
 module Graft.Build
   ( Build
   , run
@@ -46,7 +46,7 @@ import Graft.Builder (Builder, BuilderError, Checkpoint)
 import qualified Graft.Builder as Builder
 import Graft.Green.Internal (GreenElement, GreenNode)
 
--- | A construction in progress: a state monad over 'Builder' that stops at
+-- | A construction in progress: a state monad over t'Builder' that stops at
 -- the first 'BuilderError'.
 newtype Build kind a = Build (Builder kind -> Either BuilderError (a, Builder kind))
 

@@ -1,7 +1,7 @@
 # Run the benchmarks
 
 Run these commands from the package root. The benchmark component adds
-`deepseq` and `tasty-bench` dependencies. The library's dependencies stay unchanged.
+`tasty-bench` to the library's dependencies.
 Python 3 runs the measurement script. Linux CPU pinning also requires `taskset`.
 
 Build the library and benchmarks with optimisation:

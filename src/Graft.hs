@@ -25,9 +25,15 @@
 --   in a monad or as a pure value.
 -- * "Graft.Ast": typed views of your grammar's nodes and tokens.
 -- * "Graft.Range": half-open byte ranges.
--- * "Graft.LineIndex": line, column and UTF-16 positions.
+-- * "Graft.LineIndex": line and column positions in UTF-8 or UTF-16 units.
 --
--- All lengths and offsets are 'TextLength', a count of UTF-8 bytes.
+-- All lengths and offsets are t'TextLength', a count of UTF-8 bytes.
+--
+-- Importing "Graft" unqualified brings in constructors with common names,
+-- such as 'Node' and 'Token', and the type synonym t'Path'. If they clash
+-- with other imports, import only what you use, as in
+-- @import Graft (GreenElement (..), TextLength)@, or import "Graft"
+-- qualified too.
 --
 -- = Example
 --

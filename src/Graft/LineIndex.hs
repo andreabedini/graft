@@ -4,7 +4,7 @@
 -- column positions, including the UTF-16 columns that the Language Server
 -- Protocol uses by default.
 --
--- A 'LineIndex' describes one source text. Build it from the rendered tree,
+-- A t'LineIndex' describes one source text. Build it from the rendered tree,
 -- and rebuild it after an edit; it does not follow the tree.
 --
 -- Lines end at @\\n@, @\\r\\n@ or a lone @\\r@, as in the Language Server

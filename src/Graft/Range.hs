@@ -1,7 +1,7 @@
 -- | Half-open ranges of UTF-8 byte offsets: a range includes its start and
 -- excludes its end.
 --
--- This module is meant to be imported qualified; 'TextRange' is also
+-- This module is meant to be imported qualified; t'TextRange' is also
 -- exported by "Graft":
 --
 -- > import Graft
