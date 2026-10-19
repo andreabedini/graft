@@ -168,11 +168,12 @@ jobs:
       - name: Build dependencies
         run: cabal build all --only-dependencies -j
 
+      # graft has a docs/ directory of its own, so the tarballs go elsewhere.
       - name: Documentation for Hackage
         run: |
           cabal haddock all --haddock-for-hackage
-          mkdir docs
-          mv dist-newstyle/*-docs.tar.gz docs/
+          mkdir hackage-docs
+          mv dist-newstyle/*-docs.tar.gz hackage-docs/
 
       - name: Documentation of the project
         run: cabal haddock-project --hackage --output=site
@@ -180,7 +181,7 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: docs
-          path: docs/*-docs.tar.gz
+          path: hackage-docs/*-docs.tar.gz
           if-no-files-found: error
 
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
