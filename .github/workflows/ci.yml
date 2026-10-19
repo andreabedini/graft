@@ -64,8 +64,12 @@ jobs:
             build-runner: ubuntu-24.04-arm
           - target: x86_64-macos
             build-runner: macos-15-intel
+          # macos-latest ships the MacOSX27.0 SDK, whose .tbd stubs list an
+          # arm64e.x1 architecture that its linker rejects ("tapi error:
+          # malformed file"), so nothing links there with any GHC. Move back
+          # to macos-latest once that image links again.
           - target: aarch64-macos
-            build-runner: macos-latest
+            build-runner: macos-15
           - target: x86_64-windows
             build-runner: windows-latest
 
