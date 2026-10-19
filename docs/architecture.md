@@ -183,7 +183,9 @@ value, keeps the original token when the value is unchanged, so `001` stays
 
 `Graft.LineIndex` records where each line starts in a text and converts byte
 offsets to and from zero-based lines and columns. Columns can be counted in
-UTF-8 bytes or in UTF-16 code units, the Language Server Protocol's default.
+UTF-8 bytes or in UTF-16 code units, the Language Server Protocol's default,
+and each unit has its own position type, so a column in one can't be passed
+where the other is expected.
 Lines end at `\n`, `\r\n` or a lone `\r`, as in that protocol, and columns past
 the end of a line clamp to it. An index describes one text and must be rebuilt
 after an edit.

@@ -22,19 +22,20 @@
 -- >>> import qualified Graft.LineIndex as LineIndex
 -- >>> let index = LineIndex.fromText "let x =\r\n  \"\x1F600\" in x\n"
 -- >>> LineIndex.utf8Position 16 index
--- Just (Position {positionLine = 1, positionColumn = 7})
+-- Just (Utf8Position {utf8Line = 1, utf8Column = 7})
 -- >>> LineIndex.utf16Position 16 index
--- Just (Position {positionLine = 1, positionColumn = 5})
--- >>> LineIndex.fromUtf16Position (Position 1 5) index
+-- Just (Utf16Position {utf16Line = 1, utf16Column = 5})
+-- >>> LineIndex.fromUtf16Position (Utf16Position 1 5) index
 -- Just 16
 module Graft.LineIndex
   ( LineIndex
   , fromText
   , lineCount
   , lineStart
-  , Position (..)
+  , Utf8Position (..)
   , utf8Position
   , fromUtf8Position
+  , Utf16Position (..)
   , utf16Position
   , fromUtf16Position
   ) where
@@ -59,19 +60,34 @@ instance Show LineIndex where
   showsPrec precedence (LineIndex text _) = showParen (precedence > 10) $
     showString "LineIndex.fromText " . showsPrec 11 text
 
--- | A zero-based line and column. The unit of the column depends on the
--- function that produced or consumes it.
-data Position = Position
-  { positionLine :: !Int
-  , positionColumn :: !Int
+-- | A zero-based line and a column counted in UTF-8 bytes. The two kinds of
+-- position are separate types so that a column in one unit cannot be passed
+-- where the other is expected.
+data Utf8Position = Utf8Position
+  { utf8Line :: !Int
+  , utf8Column :: !Int
   }
   deriving (Eq, Ord, Show)
 
-instance NFData Position where
-  rnf (Position _ _) = ()
+instance NFData Utf8Position where
+  rnf (Utf8Position _ _) = ()
 
-instance Hashable Position where
-  hashWithSalt salt (Position line column) = salt `hashWithSalt` line `hashWithSalt` column
+instance Hashable Utf8Position where
+  hashWithSalt salt (Utf8Position line column) = salt `hashWithSalt` line `hashWithSalt` column
+
+-- | A zero-based line and a column counted in UTF-16 code units, as the
+-- Language Server Protocol counts them by default.
+data Utf16Position = Utf16Position
+  { utf16Line :: !Int
+  , utf16Column :: !Int
+  }
+  deriving (Eq, Ord, Show)
+
+instance NFData Utf16Position where
+  rnf (Utf16Position _ _) = ()
+
+instance Hashable Utf16Position where
+  hashWithSalt salt (Utf16Position line column) = salt `hashWithSalt` line `hashWithSalt` column
 
 -- | Index the lines of a text, in time proportional to its length.
 fromText :: Text -> LineIndex
@@ -98,18 +114,18 @@ lineStart line (LineIndex _ starts)
 
 -- | Line and UTF-8 byte column of an offset in @[0, length]@. Any byte offset
 -- is accepted, including one inside a multibyte character.
-utf8Position :: TextLength -> LineIndex -> Maybe Position
+utf8Position :: TextLength -> LineIndex -> Maybe Utf8Position
 utf8Position (TextLength offset) index@(LineIndex text _)
   | offset < 0 || offset > textBytes text = Nothing
-  | otherwise = Just (Position line (offset - startOf index line))
+  | otherwise = Just (Utf8Position line (offset - startOf index line))
   where
     line = lineOf offset index
 
 -- | Offset of a line and UTF-8 byte column. A column past the end of the
 -- line's content is clamped to it, as the Language Server Protocol requires;
 -- a line that does not exist returns 'Nothing'.
-fromUtf8Position :: Position -> LineIndex -> Maybe TextLength
-fromUtf8Position (Position line column) index
+fromUtf8Position :: Utf8Position -> LineIndex -> Maybe TextLength
+fromUtf8Position (Utf8Position line column) index
   | line < 0 || line >= lineCount index || column < 0 = Nothing
   | otherwise = Just (TextLength (start + min column (contentEnd index line - start)))
   where
@@ -117,11 +133,11 @@ fromUtf8Position (Position line column) index
 
 -- | Line and UTF-16 column of an offset in @[0, length]@, or 'Nothing' if the
 -- offset lies outside the text or inside a multibyte character.
-utf16Position :: TextLength -> LineIndex -> Maybe Position
+utf16Position :: TextLength -> LineIndex -> Maybe Utf16Position
 utf16Position (TextLength offset) index@(LineIndex text _)
   | offset < 0 || offset > textBytes text = Nothing
   | offset < textBytes text && continuation (byteAt text offset) = Nothing
-  | otherwise = Just (Position line (go 0 (startOf index line)))
+  | otherwise = Just (Utf16Position line (go 0 (startOf index line)))
   where
     line = lineOf offset index
     go !units !position
@@ -132,8 +148,8 @@ utf16Position (TextLength offset) index@(LineIndex text _)
 -- content is clamped to it, as the Language Server Protocol requires. Returns
 -- 'Nothing' for a line that does not exist or a column that falls between
 -- the two halves of a surrogate pair.
-fromUtf16Position :: Position -> LineIndex -> Maybe TextLength
-fromUtf16Position (Position line column) index@(LineIndex text _)
+fromUtf16Position :: Utf16Position -> LineIndex -> Maybe TextLength
+fromUtf16Position (Utf16Position line column) index@(LineIndex text _)
   | line < 0 || line >= lineCount index || column < 0 = Nothing
   | otherwise = TextLength <$> go 0 (startOf index line)
   where

@@ -71,7 +71,8 @@ module Graft
     -- * Ranges and positions
   , TextRange
   , LineIndex
-  , Position (..)
+  , Utf8Position (..)
+  , Utf16Position (..)
     -- * Building
   , Build
   , Builder
@@ -87,5 +88,5 @@ import Graft.Build (Build)
 import Graft.Builder (Builder, BuilderError (..), Checkpoint)
 import Graft.Cursor (Cursor, Path, PathError (..), TokenAtOffset (..), WalkEvent (..))
 import Graft.Green (ChildEditError (..), GreenElement (..), GreenNode, GreenToken, TextLength (..))
-import Graft.LineIndex (LineIndex, Position (..))
+import Graft.LineIndex (LineIndex, Utf16Position (..), Utf8Position (..))
 import Graft.Range (TextRange)

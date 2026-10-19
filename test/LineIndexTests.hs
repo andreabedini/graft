@@ -43,11 +43,11 @@ propPositions = forAll genText $ \text ->
       [ LineIndex.lineCount index === terminators text + 1
       , conjoin
           [ counterexample (show place) $ conjoin
-              [ LineIndex.utf8Position (placeOffset place) index === Just (Position (placeLine place) (placeUtf8 place))
-              , LineIndex.utf16Position (placeOffset place) index === Just (Position (placeLine place) (placeUtf16 place))
+              [ LineIndex.utf8Position (placeOffset place) index === Just (Utf8Position (placeLine place) (placeUtf8 place))
+              , LineIndex.utf16Position (placeOffset place) index === Just (Utf16Position (placeLine place) (placeUtf16 place))
               , placeAfterCarriage place .||. conjoin
-                  [ LineIndex.fromUtf8Position (Position (placeLine place) (placeUtf8 place)) index === Just (placeOffset place)
-                  , LineIndex.fromUtf16Position (Position (placeLine place) (placeUtf16 place)) index === Just (placeOffset place)
+                  [ LineIndex.fromUtf8Position (Utf8Position (placeLine place) (placeUtf8 place)) index === Just (placeOffset place)
+                  , LineIndex.fromUtf16Position (Utf16Position (placeLine place) (placeUtf16 place)) index === Just (placeOffset place)
                   ]
               ]
           | place <- places text
@@ -65,13 +65,13 @@ propInvalid = forAll genText $ \text ->
       , LineIndex.utf8Position (size + 1) index === Nothing
       , LineIndex.utf16Position (size + 1) index === Nothing
       , conjoin [LineIndex.utf16Position offset index === Nothing | offset <- inside]
-      , conjoin [fmap positionLine (LineIndex.utf8Position offset index) =/= Nothing | offset <- inside]
-      , LineIndex.fromUtf16Position (Position (LineIndex.lineCount index) 0) index === Nothing
-      , LineIndex.fromUtf16Position (Position 0 (-1)) index === Nothing
+      , conjoin [fmap utf8Line (LineIndex.utf8Position offset index) =/= Nothing | offset <- inside]
+      , LineIndex.fromUtf16Position (Utf16Position (LineIndex.lineCount index) 0) index === Nothing
+      , LineIndex.fromUtf16Position (Utf16Position 0 (-1)) index === Nothing
         -- A column between the two halves of a surrogate pair, including
         -- one at the end of a line or of the text.
       , conjoin
-          [ LineIndex.fromUtf16Position (Position (placeLine here) (placeUtf16 here + 1)) index === Nothing
+          [ LineIndex.fromUtf16Position (Utf16Position (placeLine here) (placeUtf16 here + 1)) index === Nothing
           | (here, next) <- zip (places text) (drop 1 (places text))
           , placeLine next == placeLine here
           , placeUtf16 next == placeUtf16 here + 2
@@ -84,17 +84,17 @@ regressions = once $ conjoin
   , LineIndex.lineCount (LineIndex.fromText (Text.pack "a\r\nb\rc\n")) === 4
   , map (`LineIndex.lineStart` LineIndex.fromText (Text.pack "a\r\nb\rc\n")) [0 .. 4] === map (fmap TextLength) [Just 0, Just 3, Just 5, Just 7, Nothing]
   -- Columns past the end of a line clamp to its content, before "\r\n".
-  , LineIndex.fromUtf16Position (Position 0 99) (LineIndex.fromText (Text.pack "ab\r\ncd")) === Just 2
-  , LineIndex.fromUtf8Position (Position 1 99) (LineIndex.fromText (Text.pack "ab\r\ncd")) === Just 6
+  , LineIndex.fromUtf16Position (Utf16Position 0 99) (LineIndex.fromText (Text.pack "ab\r\ncd")) === Just 2
+  , LineIndex.fromUtf8Position (Utf8Position 1 99) (LineIndex.fromText (Text.pack "ab\r\ncd")) === Just 6
   -- U+1F600 takes four bytes and two UTF-16 code units.
-  , LineIndex.utf16Position 5 (LineIndex.fromText (Text.pack "x\x1F600y")) === Just (Position 0 3)
-  , LineIndex.fromUtf16Position (Position 0 2) (LineIndex.fromText (Text.pack "x\x1F600y")) === Nothing
-  , LineIndex.fromUtf16Position (Position 0 3) (LineIndex.fromText (Text.pack "x\x1F600y")) === Just 5
+  , LineIndex.utf16Position 5 (LineIndex.fromText (Text.pack "x\x1F600y")) === Just (Utf16Position 0 3)
+  , LineIndex.fromUtf16Position (Utf16Position 0 2) (LineIndex.fromText (Text.pack "x\x1F600y")) === Nothing
+  , LineIndex.fromUtf16Position (Utf16Position 0 3) (LineIndex.fromText (Text.pack "x\x1F600y")) === Just 5
   -- A surrogate pair last on its line is not skipped by the clamp.
-  , LineIndex.fromUtf16Position (Position 0 1) (LineIndex.fromText (Text.pack "\x1F600")) === Nothing
-  , LineIndex.fromUtf16Position (Position 0 2) (LineIndex.fromText (Text.pack "a\x1F600\nb")) === Nothing
-  , LineIndex.fromUtf16Position (Position 0 2) (LineIndex.fromText (Text.pack "\x1F600")) === Just 4
-  , LineIndex.fromUtf16Position (Position 0 9) (LineIndex.fromText (Text.pack "\x1F600")) === Just 4
+  , LineIndex.fromUtf16Position (Utf16Position 0 1) (LineIndex.fromText (Text.pack "\x1F600")) === Nothing
+  , LineIndex.fromUtf16Position (Utf16Position 0 2) (LineIndex.fromText (Text.pack "a\x1F600\nb")) === Nothing
+  , LineIndex.fromUtf16Position (Utf16Position 0 2) (LineIndex.fromText (Text.pack "\x1F600")) === Just 4
+  , LineIndex.fromUtf16Position (Utf16Position 0 9) (LineIndex.fromText (Text.pack "\x1F600")) === Just 4
   ]
 
 lineIndexProperties :: [(String, Property)]

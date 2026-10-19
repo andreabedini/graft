@@ -16,6 +16,7 @@ Initial release.
 * Builders for parsers, with checkpoints for wrapping already-emitted elements,
   as a pure value or in the `Build` monad.
 * Typed AST views over cursors.
-* A line index for line, column and UTF-16 positions.
+* A line index for line and column positions, in UTF-8 bytes or UTF-16 code
+  units, with a separate position type for each unit.
 * `NFData`, `Hashable` and `Exception` instances, and `Functor` over kinds for
   green trees. `Show` prints the calls that rebuild abstract values.
