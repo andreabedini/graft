@@ -24,7 +24,9 @@ Graft is tested with GHC 9.8, 9.10, 9.12 and 9.14 (see `tested-with` in
   ```
 
   On a fresh checkout the first `cabal test` would run before the file exists,
-  so build first; the suite says so if the file is missing. Examples in
+  so build first; the suite says so if the file is missing. The repository's
+  `cabal.project` makes cabal write the file; from a source tarball, add
+  `--write-ghc-environment-files=always` to the build. Examples in
   `@`-blocks and `>`-blocks are not checked, so keep those short and compile
   them by hand when they change.
 

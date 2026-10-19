@@ -5,21 +5,28 @@
 --
 -- > cabal build all -fdoctest
 -- > cabal test graft-doctest -fdoctest
+--
+-- Outside the repository, where cabal.project is absent, pass
+-- --write-ghc-environment-files=always to the build.
 module Main (main) where
 
-import Control.Monad (when)
-import Data.List (isPrefixOf)
-import System.Directory (listDirectory)
+import Control.Monad (unless)
+import Data.Version (showVersion)
+import System.Directory (doesFileExist)
 import System.Exit (exitFailure)
 import System.IO (hPutStrLn, stderr)
+import System.Info (arch, fullCompilerVersion, os)
 import Test.DocTest (doctest)
 
 main :: IO ()
 main = do
-  files <- listDirectory "."
-  when (not (any (".ghc.environment." `isPrefixOf`) files)) $ do
-    hPutStrLn stderr "No GHC environment file in the package directory."
-    hPutStrLn stderr "Run `cabal build all -fdoctest` once, then run the doctests again."
+  -- doctest runs this GHC, so it needs this GHC's environment file.
+  let environment = ".ghc.environment." ++ arch ++ "-" ++ os ++ "-" ++ showVersion fullCompilerVersion
+  present <- doesFileExist environment
+  unless present $ do
+    hPutStrLn stderr ("No " ++ environment ++ " in the package directory. Build once with")
+    hPutStrLn stderr "  cabal build all -fdoctest --write-ghc-environment-files=always"
+    hPutStrLn stderr "using the same compiler, then run the doctests again."
     exitFailure
   doctest
     [ "-isrc"
