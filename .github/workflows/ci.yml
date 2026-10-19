@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: GHC ${{ matrix.ghc }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Keep in step with tested-with in graft.cabal.
+        ghc: ["9.8.4", "9.10.3", "9.12.2", "9.14.1"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: haskell-actions/setup@v2
+        id: setup
+        with:
+          ghc-version: ${{ matrix.ghc }}
+          cabal-version: latest
+      - name: Plan
+        run: |
+          cabal update
+          cabal build all --enable-tests --enable-benchmarks -fdoctest --dry-run
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.setup.outputs.cabal-store }}
+          key: store-${{ matrix.ghc }}-${{ hashFiles('dist-newstyle/cache/plan.json') }}
+          restore-keys: store-${{ matrix.ghc }}-
+      - name: Build
+        run: cabal build all --enable-tests --enable-benchmarks -fdoctest --ghc-options=-Werror
+      - name: Test
+        # The build wrote the GHC environment file that the doctests need.
+        run: cabal test all --enable-tests --enable-benchmarks -fdoctest --test-show-details=direct
+
+  oldest:
+    name: Oldest dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: haskell-actions/setup@v2
+        with:
+          ghc-version: "9.8.4"
+          cabal-version: latest
+      - run: cabal update
+      - run: cabal test all --enable-tests --prefer-oldest --test-show-details=direct
+
+  package:
+    name: Package checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: haskell-actions/setup@v2
+        with:
+          ghc-version: "9.12.2"
+          cabal-version: latest
+      - run: cabal check
+      - run: cabal sdist
+      - name: README program matches examples/GettingStarted.hs
+        run: awk '/^```haskell/{f=1;next} /^```/{if(f){exit}} f' README.md | diff - examples/GettingStarted.hs
