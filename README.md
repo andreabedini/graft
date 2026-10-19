@@ -91,16 +91,16 @@ bytes, never characters.
 
 - The [Haddock documentation](https://hackage.haskell.org/package/graft) covers
   every function's contract, cost and edge cases.
-- [`examples/ExactUpdate.hs`](examples/ExactUpdate.hs) uses typed views to
+- [`examples/ExactUpdate.hs`](https://github.com/andreabedini/graft/blob/main/examples/ExactUpdate.hs) uses typed views to
   change a number's value while keeping its spelling (`001` stays `001` if the
   value doesn't change).
-- [`docs/architecture.md`](docs/architecture.md) explains the design, how it
+- [`docs/architecture.md`](https://github.com/andreabedini/graft/blob/main/docs/architecture.md) explains the design, how it
   differs from Rowan, and what is left to do.
-- [`docs/performance.md`](docs/performance.md) records benchmark results, and
-  [`bench/README.md`](bench/README.md) explains how to reproduce them.
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) describes how to build and test Graft.
+- [`docs/performance.md`](https://github.com/andreabedini/graft/blob/main/docs/performance.md) records benchmark results, and
+  [`bench/README.md`](https://github.com/andreabedini/graft/blob/main/bench/README.md) explains how to reproduce them.
+- [`CONTRIBUTING.md`](https://github.com/andreabedini/graft/blob/main/CONTRIBUTING.md) describes how to build and test Graft.
 
 ## License
 
-[MIT](LICENSE). Graft is a port of ideas from Rowan, which is MIT or Apache-2.0;
-see [NOTICE](NOTICE) and [licenses/ROWAN-MIT](licenses/ROWAN-MIT).
+[MIT](https://github.com/andreabedini/graft/blob/main/LICENSE). Graft is a port of ideas from Rowan, which is MIT or Apache-2.0;
+see [NOTICE](https://github.com/andreabedini/graft/blob/main/NOTICE) and [licenses/ROWAN-MIT](https://github.com/andreabedini/graft/blob/main/licenses/ROWAN-MIT).

@@ -86,7 +86,21 @@ test-suite graft-tests
         text >=2.0 && <2.2
     default-language: Haskell2010
 
--- The README's worked example, built and run so that it tracks the API.
+-- The program in the README's Getting started section, built and run so that
+-- it tracks the API. CI checks that the README shows this file unchanged.
+test-suite graft-getting-started
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    main-is:          GettingStarted.hs
+    hs-source-dirs:   examples
+    build-depends:
+        base >=4.19 && <4.23,
+        graft,
+        text >=2.0 && <2.2
+    default-language: Haskell2010
+
+-- The exact-preserving update example linked from the README and the
+-- architecture note, built and run so that it tracks the API.
 test-suite graft-example
     import:           warnings
     type:             exitcode-stdio-1.0

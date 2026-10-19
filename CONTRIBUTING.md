@@ -12,6 +12,9 @@ Graft is tested with GHC 9.8, 9.10, 9.12 and 9.14 (see `tested-with` in
 `graft.cabal`). There are three test suites:
 
 - `graft-tests` checks the library against independent models.
+- `graft-getting-started` builds and runs
+  [`examples/GettingStarted.hs`](examples/GettingStarted.hs), the program in
+  the README. Keep the two identical; CI compares them.
 - `graft-example` builds and runs [`examples/ExactUpdate.hs`](examples/ExactUpdate.hs),
   so changes to the API that break the example break the build.
 - `graft-doctest` checks every `>>>` example in the Haddock documentation. It
