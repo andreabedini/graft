@@ -71,6 +71,7 @@ a parent node without re-allocating it.
 | Token or element at an offset | Logarithmic in the width of each level, times depth |
 | Building a node | Linear in its number of children |
 | Replacing a child | Linear in the parent's width: the array is copied, and the length is adjusted by the difference |
+| Moving up or sideways from an edited element | Linear in the parent's width: the parent is rebuilt |
 | Splicing children | Linear in the parent's width plus the replacements |
 | Rendering | Linear in the output |
 
@@ -93,11 +94,18 @@ cursor computes absolute ranges from the cached child offsets.
 
 A cursor also records whether its focus has been replaced. `Cursor.replace`
 doesn't rebuild anything; it returns a cursor with the new focus and that flag
-set. The parent is rebuilt when the cursor next moves up or sideways, and the
-rebuilt parent is marked as replaced in turn. So a run of edits in one region,
-such as renaming every token in a list, rebuilds each ancestor once rather than
-once per edit, and the cursor stays usable for navigation throughout.
-`Cursor.tree` climbs to the root and returns the edited tree.
+set. The parent is rebuilt when the cursor next moves up or sideways, by
+copying its child array, and the rebuilt parent is marked as replaced in turn.
+The cursor stays usable for navigation throughout, and `Cursor.tree` climbs to
+the root and returns the edited tree.
+
+Every move away from an edited element rebuilds its parent, so a run of edits
+among the children of one node costs the node's width per edit: renaming every
+token in a list of n tokens through one cursor takes time proportional to n².
+Editing the node once, with `Cursor.modify` or `Cursor.spliceChildren`, costs
+its width once. Keeping pending replacements in the cursor and applying them
+when it climbs would remove the difference without changing the API, and is
+left for when a real codemod needs it.
 
 Edits are persistent. The cursor you started with still sees the original tree,
 and so does every cursor derived from it before the edit. Paths and byte ranges

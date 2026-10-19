@@ -55,6 +55,17 @@ wideBench size = bgroup (show size)
           endAt index input = cursorEnd (checked (Cursor.childAt index (Cursor.fromGreen input)))
           replace index input = Green.length (Cursor.tree (Cursor.replace replacement
             (checked (Cursor.childAt index (Cursor.fromGreen input)))))
+          -- Replace every child through one cursor, moving to the next sibling
+          -- after each edit, as a codemod would.
+          editEach input = Green.length (Cursor.tree (go (checked (Cursor.childAt 0 (Cursor.fromGreen input)))))
+            where
+              go cursor = let edited = Cursor.replace replacement cursor
+                in maybe edited go (Cursor.nextSibling edited)
+          -- The same result from one edit of the parent.
+          editParent input = Green.length (Cursor.tree (Cursor.modify rebuild (Cursor.fromGreen input)))
+            where
+              rebuild (Node parent) = Node (Green.node (Green.nodeKind parent) (map (const replacement) (Green.children parent)))
+              rebuild token = token
       in bgroup "prepared"
         [ bench "render" $ nf Green.render tree
         , bench "builder-reuse" $ whnf (cached . buildReuse) node
@@ -72,6 +83,8 @@ wideBench size = bgroup (show size)
         , bench "replace-last" $ whnf (replace (size - 1)) tree
         , bench "splice-middle" $ whnf (cached . checked . Green.spliceChildren
             (size `div` 2) (size `div` 2) [replacement]) node
+        , bench "edit-each-child" $ whnf editEach tree
+        , bench "edit-parent-once" $ whnf editParent tree
         , bench "typed-first" $ whnf (maybe 0 (cursorEnd . tokenSyntax) .
             (Ast.token :: Cursor Kind -> Maybe Named)) root
         , bench "typed-last" $ whnf (maybe 0 (cursorEnd . tokenSyntax) .

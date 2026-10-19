@@ -162,6 +162,23 @@ Two changes followed the 2026-10-17 run:
   Even on the busy machine, building 10,000 tokens took 158–176 µs, against
   476–483 µs in the 2026-10-17 run.
 
+### Runs of edits (2026-10-19)
+
+Two cases replace every child of the wide node: `edit-each-child` moves
+through the children with one cursor, replacing each and stepping to the next
+sibling; `edit-parent-once` rebuilds the node's child list and replaces the
+node once.
+
+| Children | Each child through one cursor | The parent once |
+| ---: | ---: | ---: |
+| 100 | 12.7 µs | 2.35 µs |
+| 1,000 | 880 µs | 22.8 µs |
+| 10,000 | 93.0 ms (1.5 GB allocated) | 250 µs |
+
+Each step away from an edited child copies the parent's child array, so the
+run is quadratic in the width. The architecture note previously claimed it
+rebuilt each ancestor once; it doesn't.
+
 ## What the numbers suggest
 
 - Memory per token is the largest remaining cost. Each token occupies an array
@@ -169,6 +186,9 @@ Two changes followed the 2026-10-17 run:
   identical tokens such as `;` or a single space. A node cache
   like Rowan's could share them. Its value depends on duplicate rates in real
   parser output, which haven't been measured.
+- A run of edits through one cursor copies the parent once per edit. Keeping
+  pending replacements in the cursor and applying them on the way up would
+  make it linear, without an API change.
 - Edits in very wide nodes copy the whole child array. A chunked or
   finger-tree child list would make them logarithmic, at a cost to access and
   memory in the common case.

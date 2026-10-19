@@ -18,6 +18,7 @@
 -- > import qualified Graft.Green as Green
 -- >
 -- > -- Replace the text of every Name token, in one pass through one cursor.
+-- > -- Each step after a rename copies the parent's children (see 'replace').
 -- > renameAll :: Text -> GreenElement Kind -> GreenElement Kind
 -- > renameAll name root = maybe root (Cursor.tree . go) (Cursor.firstToken (Cursor.fromGreen root))
 -- >   where
@@ -349,10 +350,14 @@ covering query cursor
       _ -> current
 
 -- | Replace the focus, returning a cursor at the same path in the edited
--- tree. The replacement can be of any kind, node or token. Ancestors are
--- rebuilt only when the cursor moves up or sideways, so a run of edits in one
--- region rebuilds each ancestor once. The original cursor still sees the
--- original tree. 'tree' gives the edited tree.
+-- tree. The replacement can be of any kind, node or token. The original
+-- cursor still sees the original tree. 'tree' gives the edited tree.
+--
+-- Nothing is rebuilt until the cursor moves up or sideways; then the parent
+-- is rebuilt by copying its child array. Editing @k@ children of one node,
+-- moving between them, therefore takes time proportional to @k@ times the
+-- node's width. To change many children of one node, edit the node once
+-- instead, with 'modify' or 'spliceChildren'.
 replace :: GreenElement kind -> Cursor kind -> Cursor kind
 replace replacement (Cursor _ offset _ context) = Cursor replacement offset True context
 
