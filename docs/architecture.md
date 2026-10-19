@@ -71,7 +71,8 @@ a parent node without re-allocating it.
 | Token or element at an offset | Logarithmic in the width of each level, times depth |
 | Building a node | Linear in its number of children |
 | Replacing a child | Linear in the parent's width: the array is copied, and the length is adjusted by the difference |
-| Moving up or sideways from an edited element | Linear in the parent's width: the parent is rebuilt |
+| Moving up or sideways from an edited element, the first time | Logarithmic in the number of the parent's replaced children: the edit is recorded, not copied |
+| Reading an edited node, or the edited tree | Linear in the width of each edited node, once per version |
 | Splicing children | Linear in the parent's width plus the replacements |
 | Rendering | Linear in the output |
 
@@ -87,25 +88,27 @@ question that needs measurements from real parsers.
 
 ## Cursors
 
-A cursor is a zipper. It holds the focused element, its absolute offset, and a
-chain of contexts: for each ancestor, the parent node, the parent's offset, and
-the focus's index in it. Moving down, up or sideways is constant time, and the
-cursor computes absolute ranges from the cached child offsets.
+A cursor is a zipper. It holds the focused element, its absolute offset and
+length, its index in the parent, and the parent's cursor, and so on up to the
+root. Moving down, up or sideways is constant time, and the cursor computes
+absolute ranges from the cached child offsets.
 
-A cursor also records whether its focus has been replaced. `Cursor.replace`
-doesn't rebuild anything; it returns a cursor with the new focus and that flag
-set. The parent is rebuilt when the cursor next moves up or sideways, by
-copying its child array, and the rebuilt parent is marked as replaced in turn.
-The cursor stays usable for navigation throughout, and `Cursor.tree` climbs to
-the root and returns the edited tree.
+`Cursor.replace` doesn't copy anything. It returns a cursor with the new
+focus whose parent is a thunk: the parent as it was, with the new focus added
+to a map of its replaced children. The first move up or sideways forces it,
+and the result is the parent that every later cursor moving through it
+shares, so a walk that edits many tokens, and reads the ancestors of each,
+records each edit in each ancestor once. A parent with replaced children
+reads its children from the original node and the map, so moving among them
+copies nothing. Its own node is built, with one copy of the child array and
+all the replacements, the first time something reads it, and `Cursor.tree`
+builds the nodes from the edits to the root in one pass. Renaming every token
+in a list of n tokens through one cursor therefore takes time proportional to
+n, as editing the list node once with `Cursor.modify` does.
 
-Every move away from an edited element rebuilds its parent, so a run of edits
-among the children of one node costs the node's width per edit: renaming every
-token in a list of n tokens through one cursor takes time proportional to n².
-Editing the node once, with `Cursor.modify` or `Cursor.spliceChildren`, costs
-its width once. Keeping pending replacements in the cursor and applying them
-when it climbs would remove the difference without changing the API, and is
-left for when a real codemod needs it.
+The cost is memory: until a cursor on an edited version is dropped, it keeps
+the version of each edited node from before the edits, and the replaced
+elements with it.
 
 Edits are persistent. The cursor you started with still sees the original tree,
 and so does every cursor derived from it before the edit. Paths and byte ranges

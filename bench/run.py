@@ -74,7 +74,7 @@ def main():
     rows = []
     for size in (1000, 10000):
         for edits in (0, 100):
-            scenarios = ("tree", "shared", "cursor", "detached-token") if edits == 0 else ("latest", "history")
+            scenarios = ("tree", "shared", "cursor", "detached-token", "renamed-tree", "renamed-cursor", "walk-cursors") if edits == 0 else ("latest", "history", "renamed-passes")
             for scenario in scenarios:
                 command = prefix + [str(binary), "--residency", scenario, str(size), str(edits),
                                     "+RTS", "-T", "-RTS"]

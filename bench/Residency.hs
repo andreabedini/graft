@@ -11,13 +11,14 @@ import qualified Graft.Cursor as Cursor
 import qualified Graft.Green as Green
 import System.Mem (performMajorGC)
 
-data Retained = Roots [GreenElement Kind] | Focus (Cursor Kind)
+data Retained = Roots [GreenElement Kind] | Focus (Cursor Kind) | Visits [Cursor Kind]
 
 -- Force all snapshot roots, but avoid revisiting unchanged descendants for
 -- every edit. Smart constructors already force their immediate cache sums.
 observe :: Retained -> TextLength
 observe (Roots roots) = List.foldl' (\total root -> total + Green.length root) 0 roots
 observe (Focus cursor) = cursorEnd cursor
+observe (Visits cursors) = List.foldl' (\total cursor -> total + cursorEnd cursor) 0 cursors
 
 -- Keep fixture creation out of the caller: only this result survives its GC.
 {-# NOINLINE prepare #-}
@@ -41,7 +42,12 @@ prepare scenario size edits = do
         "history" -> evaluated (Roots (snapshots edits path root))
         "cursor" -> pure (Focus (checked (Cursor.at path (Cursor.fromGreen root))))
         "detached-token" -> pure (Roots [Cursor.green (checked (Cursor.at path (Cursor.fromGreen root)))])
-        _ -> error "scenario must be tree, shared, latest, history, cursor or detached-token"
+        "renamed-tree" -> evaluated (Roots [maybe root Cursor.tree (renameWalk False root)])
+        "renamed-cursor" -> evaluated (Focus (selected (renameWalk False root)))
+        "renamed-passes" -> evaluated (Focus (renamePasses edits root))
+        "walk-cursors" -> evaluated (Visits (selected (renameVisits False (Cursor.fromGreen root))))
+        _ -> error ("scenario must be tree, shared, latest, history, cursor, detached-token, "
+          ++ "renamed-tree, renamed-cursor, renamed-passes or walk-cursors")
   where
     evaluated retained = evaluate (observe retained) >> pure retained
 
