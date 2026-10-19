@@ -10,7 +10,9 @@
 -- Lines end at @\\n@, @\\r\\n@ or a lone @\\r@, as in the Language Server
 -- Protocol. Lines and columns are zero-based. A line's terminator belongs to
 -- that line, so an offset just after a @\\r@ that precedes @\\n@ still lies
--- on the @\\r@'s line.
+-- on the @\\r@'s line. Its column is past the line's content, and converting
+-- the position back clamps it to the end of the content, before the @\\r@:
+-- that one offset per @\\r\\n@ does not round-trip.
 --
 -- This module is meant to be imported qualified; its types are also
 -- exported by "Graft":

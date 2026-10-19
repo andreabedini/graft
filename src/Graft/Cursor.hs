@@ -360,6 +360,10 @@ covering query cursor
 -- moving between them, therefore takes time proportional to @k@ times the
 -- node's width. To change many children of one node, edit the node once
 -- instead, with 'modify' or 'spliceChildren'.
+--
+-- Until it moves up or sideways, the returned cursor still holds the
+-- original parent, and through it the replaced element, so keeping it keeps
+-- the replaced subtree in memory.
 replace :: GreenElement kind -> Cursor kind -> Cursor kind
 replace replacement (Cursor _ offset _ context) = Cursor replacement offset True context
 

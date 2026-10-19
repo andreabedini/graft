@@ -82,13 +82,17 @@ data GreenElement kind
   deriving (Eq, Show)
 
 -- | Structural equality. Physically identical nodes compare equal without
--- traversal, which assumes that equality on @kind@ is reflexive.
+-- traversal, which assumes that equality on @kind@ is reflexive. Otherwise a
+-- subtree shared in several places is compared at each of them, so comparing
+-- two separately built trees takes time proportional to their size written
+-- out in full.
 instance Eq kind => Eq (GreenNode kind) where
   left@(GreenNode leftKind leftLength leftChildren _)
     == right@(GreenNode rightKind rightLength rightChildren _) =
       isTrue# (reallyUnsafePtrEquality# left right)
         || (leftLength == rightLength && leftKind == rightKind && leftChildren == rightChildren)
 
+-- | Visits a subtree shared in several places at each of them.
 instance NFData kind => NFData (GreenNode kind) where
   rnf (GreenNode kind _ children _) = rnf kind `seq` foldr (\child rest -> rnf child `seq` rest) () children
 
@@ -100,7 +104,8 @@ instance NFData kind => NFData (GreenElement kind) where
   rnf (Token token) = rnf token
 
 -- | Hashes the kind, the length and every child, so hashing takes time
--- proportional to the size of the tree; hashes are not cached.
+-- proportional to the size of the tree written out in full, with a shared
+-- subtree hashed at each place it appears; hashes are not cached.
 instance Hashable kind => Hashable (GreenNode kind) where
   hashWithSalt salt (GreenNode kind len children _) =
     Foldable.foldl' hashWithSalt (salt `hashWithSalt` kind `hashWithSalt` len) children
@@ -112,7 +117,11 @@ instance Hashable kind => Hashable (GreenElement kind) where
   hashWithSalt salt (Node node) = salt `hashWithSalt` (0 :: Int) `hashWithSalt` node
   hashWithSalt salt (Token token) = salt `hashWithSalt` (1 :: Int) `hashWithSalt` token
 
--- | Maps every kind in the tree, reusing the cached lengths and offsets.
+-- | Maps every kind in the tree, reusing the cached lengths and offsets. A
+-- subtree shared in several places is mapped at each of them, and the
+-- results are not shared. Kinds are stored strictly, so @fmap f@ evaluates
+-- each result of @f@, and the functor laws hold for functions that don't
+-- return bottom.
 instance Functor GreenNode where
   fmap f (GreenNode kind len children starts) =
     GreenNode (f kind) len (mapSmallArray' (fmap f) children) starts

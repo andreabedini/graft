@@ -1,7 +1,8 @@
 {-# LANGUAGE BangPatterns #-}
 
 -- | Building green trees in a monad, as a parser does. 'node' brackets a
--- node, so it cannot be left open, and the first error stops the build.
+-- node, so a body that opens and closes its own nodes in pairs leaves none
+-- open, and the first error stops the build.
 --
 -- This module is meant to be imported qualified; its types are also
 -- exported by "Graft":
@@ -80,7 +81,9 @@ exec :: Build kind a -> Either BuilderError (GreenNode kind)
 exec = fmap snd . run
 
 -- | A node around the elements that the body emits. The node is closed when
--- the body returns, so it cannot be left open or closed twice.
+-- the body returns. If the body itself closes more nodes than it opens, with
+-- 'finishNode' or 'restore', this closes some other node instead, so keep
+-- the body balanced.
 node :: kind -> Build kind a -> Build kind a
 node nodeKind body = startNode nodeKind *> body <* finishNode
 

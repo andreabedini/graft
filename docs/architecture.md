@@ -156,7 +156,8 @@ Rowan's builder asserts on misuse. Graft's pure builder returns
 `Either BuilderError` from every operation that can fail, and `Builder.finish`
 checks that every node was closed and that exactly one root node remains. The
 `Build` monad in `Graft.Build` threads the builder and the errors, and its
-`Build.node` and `Build.nodeAt` bracket a node so that it can't be left open.
+`Build.node` and `Build.nodeAt` bracket a node, so a parser that opens nodes
+only through them can't leave one open.
 `Build.save` and `Build.restore` give backtracking parsers the persistence of
 the pure builder.
 
@@ -171,8 +172,9 @@ language parameter.
 A cast checks the element's form and kind, not the grammar. A view of an
 expression with a missing operand still exists, and its accessor for that
 operand returns `Nothing`. Required fields, duplicates and token spelling are
-the application's to check. The classes have laws (a cast keeps the cursor,
-and casting a view's syntax succeeds again) that the type system can't
+the application's to check. The classes have laws (a cast looks only at the
+element, not its position; it keeps the cursor; and casting a view's syntax
+succeeds again) that the type system can't
 enforce; `Ast.matchNode` and `Ast.matchToken` implement the usual instance.
 
 `examples/ExactUpdate.hs` uses views for a semantic update: it reads a number's

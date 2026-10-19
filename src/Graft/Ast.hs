@@ -59,8 +59,11 @@ import Graft.Green.Internal (GreenElement (..), GreenNode (..), GreenToken (..))
 -- Instances should satisfy these laws, which 'matchNode' does:
 --
 -- * 'castNode' rejects token cursors.
--- * If @castNode cursor == Just view@, then @nodeSyntax view@ is @cursor@,
---   unchanged.
+-- * Whether 'castNode' succeeds depends only on the focused element,
+--   'Cursor.green', not on where it is: two cursors on equal elements are
+--   both accepted or both rejected.
+-- * If @castNode cursor@ is @Just view@, then @nodeSyntax view@ is that
+--   cursor, unchanged, with the same path, range and element.
 -- * Casting @nodeSyntax view@ succeeds again.
 class AstNode ast where
   -- | The kind type of the trees this view applies to.
