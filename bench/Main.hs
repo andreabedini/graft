@@ -123,7 +123,7 @@ chainBench count = env (pure (Prepared (Node (chainTree count)))) $ \prepared ->
   let tree = preparedTree prepared
       end = Green.length tree
   in bgroup (show count)
-    [ bench "tokens" $ whnf (List.foldl' (\total cursor -> total + cursorEnd cursor) 0 . Cursor.tokens . Cursor.fromGreen) tree
+    [ bench "tokens" $ whnf (List.foldl' (\total cursor -> total + cursorEnd cursor) 0 . Cursor.descendantTokens . Cursor.fromGreen) tree
     , bench "descendants" $ whnf (length . Cursor.descendants . Cursor.fromGreen) tree
     , bench "offset-first" $ whnf (offsetEnd 1 . Cursor.fromGreen) tree
     , bench "offset-last" $ whnf (offsetEnd (end - 1) . Cursor.fromGreen) tree
@@ -137,7 +137,7 @@ documentBench = env (pure (Prepared (Node (documentTree 1000)))) $ \prepared ->
   in bgroup "document-1000"
     [ bench "construct" $ whnf (cached . documentTree) 1000
     , bench "render" $ nf Green.render tree
-    , bench "tokens" $ whnf (List.foldl' (\total cursor -> total + cursorEnd cursor) 0 . Cursor.tokens . Cursor.fromGreen) tree
+    , bench "tokens" $ whnf (List.foldl' (\total cursor -> total + cursorEnd cursor) 0 . Cursor.descendantTokens . Cursor.fromGreen) tree
     , bench "typed-first-group" $ whnf (maybe 0 (cursorEnd . nodeSyntax) .
         (Ast.child :: Cursor Kind -> Maybe Grouped)) root
     , bench "typed-all-groups" $ whnf (List.foldl' (\total view -> total + cursorEnd (nodeSyntax view)) 0 .

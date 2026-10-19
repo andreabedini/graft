@@ -151,7 +151,7 @@ propCursorOccurrences model =
       leafPaths = [path | (path, _, selected, _) <- contexts model, isLeaf selected]
   in conjoin
       [ map describe (Cursor.descendants cursor) === expected
-      , map Cursor.path (Cursor.tokens cursor) === leafPaths
+      , map Cursor.path (Cursor.descendantTokens cursor) === leafPaths
       , conjoin
           [ fmap describe (Cursor.at path cursor) === Right occurrence
           | occurrence@(path, _, _) <- expected
@@ -224,7 +224,7 @@ propCursorTokenNavigation model =
             maybeHead [] = Nothing
             maybeHead (value : _) = Just value
         in conjoin
-            [ map Cursor.path (Cursor.tokens focus) === inside
+            [ map Cursor.path (Cursor.descendantTokens focus) === inside
             , fmap Cursor.path (Cursor.firstToken focus) === maybeHead inside
             , fmap Cursor.path (Cursor.lastToken focus) === maybeHead (reverse inside)
             , fmap Cursor.path (Cursor.nextToken focus) === maybeHead after
@@ -391,7 +391,7 @@ propRanges (NonNegative rawStart) (NonNegative rawLen) (NonNegative rawPoint) =
 
 cursorRegressions :: Property
 cursorRegressions = once $ conjoin
-  [ map Cursor.path (Cursor.tokens tree) === [[1, 0], [1, 1], [2], [3, 0], [3, 1], [5], [6]]
+  [ map Cursor.path (Cursor.descendantTokens tree) === [[1, 0], [1, 1], [2], [3, 0], [3, 1], [5], [6]]
   , fmap Cursor.path (Cursor.firstToken tree) === Just [1, 0]
   , fmap Cursor.path (Cursor.lastToken tree) === Just [6]
   , fmap Cursor.path (Cursor.firstChild tree >>= Cursor.nextToken) === Just [1, 0]
@@ -443,7 +443,7 @@ cursorRegressions = once $ conjoin
       Left err -> counterexample (show err) False
       Right focus -> inspect focus === expected
     tokensEmpty cursor = conjoin
-      [ map Cursor.path (Cursor.tokens cursor) === []
+      [ map Cursor.path (Cursor.descendantTokens cursor) === []
       , fmap Cursor.path (Cursor.firstToken cursor) === Nothing
       , fmap Cursor.path (Cursor.lastToken cursor) === Nothing
       , offsetPaths (Cursor.tokenAt 0 cursor) === NoToken

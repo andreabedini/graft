@@ -57,7 +57,7 @@ module Graft.Cursor
   , WalkEvent (..)
   , walk
     -- * Tokens
-  , tokens
+  , descendantTokens
   , firstToken
   , lastToken
   , nextToken
@@ -265,9 +265,10 @@ walk cursor = go cursor []
   where
     go current rest = Enter current : foldr go (Leave current : rest) (children current)
 
--- | Every token at or below the focus, in source order.
-tokens :: Cursor kind -> [Cursor kind]
-tokens = filter isToken . descendants
+-- | Every token at or below the focus, in source order. A token focus gives
+-- itself. The typed @Ast.tokens@ gives child tokens only.
+descendantTokens :: Cursor kind -> [Cursor kind]
+descendantTokens = filter isToken . descendants
   where
     isToken cursor = case green cursor of
       Token _ -> True

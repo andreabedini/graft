@@ -123,8 +123,9 @@ ancestors cursor = case Cursor.parent cursor of
 token :: AstToken ast => Cursor (AstTokenKind ast) -> Maybe ast
 token = listToMaybe . tokens
 
--- | Every child token that casts to the view, in source order. The list is
--- lazy.
+-- | Every child token that casts to the view, in source order. Tokens inside
+-- child nodes are not included; 'Cursor.descendantTokens' finds those. The
+-- list is lazy.
 tokens :: AstToken ast => Cursor (AstTokenKind ast) -> [ast]
 tokens = mapMaybe castToken . filter (not . isNode) . Cursor.children
 

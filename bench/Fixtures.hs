@@ -215,7 +215,7 @@ checkFixtures = do
           root = Cursor.fromGreen (Node node)
       _ <- evaluate (forceElement (Node node))
       assert "chain source" (Green.renderNode node == chainSource count)
-      assert "chain tokens" (length (Cursor.tokens root) == 2 * count + 1)
+      assert "chain tokens" (length (Cursor.descendantTokens root) == 2 * count + 1)
       assert "chain first offset" (fmap cursorEnd (singleToken (Cursor.tokenAt 0 root)) == Just 1)
     singleToken (SingleToken cursor) = Just cursor
     singleToken _ = Nothing
