@@ -238,9 +238,10 @@ children (Cursor focus offset edited context) = case focus of
   Token _ -> []
   Node node -> map (childCursor node offset edited context) [0 .. Internal.childCount node - 1]
 
--- | The focus and then each ancestor, up to the root.
+-- | Each ancestor of the focus, nearest first, up to the root. The focus is
+-- not included, unlike Rowan's @ancestors@; 'descendants' does include it.
 ancestors :: Cursor kind -> [Cursor kind]
-ancestors = unfold parent . Just
+ancestors = unfold parent . parent
 
 -- | The focus and everything below it, in preorder. A subtree that appears
 -- in several places is visited at each of them. The list is lazy.

@@ -184,7 +184,7 @@ propCursorNavigation model = forAll (elements (contexts model)) $ \(path, _, sel
           maybeFirst (value : _) = Just value
       in conjoin
           [ describe (Cursor.root focus) === describe modelRoot
-          , map Cursor.path (Cursor.ancestors focus) === [take n path | n <- reverse [0 .. length path]]
+          , map Cursor.path (Cursor.ancestors focus) === [take n path | n <- reverse [0 .. length path - 1]]
           , fmap describe (Cursor.parent focus) === expectedParent
           , map describe (Cursor.children focus) === expectedChildren
           , fmap describe (Cursor.firstChild focus) === maybeFirst expectedChildren

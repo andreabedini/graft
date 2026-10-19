@@ -117,7 +117,9 @@ one.
 Rowan has separate node and token cursors, and offers mutable red trees
 (`clone_for_update`) so that edits are visible through every handle. Graft has one cursor type for both and
 no mutation; returning a cursor from each edit gives the same ability to keep
-working after an edit, without shared mutable state.
+working after an edit, without shared mutable state. Rowan's `ancestors`
+starts with the node itself; Graft's `Cursor.ancestors` and `Ast.ancestors`
+start with the parent, while `Cursor.descendants` starts with the focus.
 
 ## Lookup by offset
 

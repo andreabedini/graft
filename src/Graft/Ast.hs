@@ -114,9 +114,7 @@ parent cursor = Cursor.parent cursor >>= castNode
 -- | Every ancestor that casts to the view, nearest first, not including the
 -- cursor itself. The list is lazy.
 ancestors :: AstNode ast => Cursor (AstNodeKind ast) -> [ast]
-ancestors cursor = case Cursor.parent cursor of
-  Nothing -> []
-  Just above -> mapMaybe castNode (Cursor.ancestors above)
+ancestors = mapMaybe castNode . Cursor.ancestors
 
 -- | The first child token that casts to the view, or 'Nothing'. Tokens inside
 -- child nodes are not searched.
