@@ -1,10 +1,12 @@
 module TestModel
   ( Kind (..), Model (..), scalar, genChar, genText, genKind, genModel
-  , compile, source, byteLength, validCaches, contexts, hugeDepth
+  , compile, source, byteLength, validCaches, contexts, hugeDepth, halfMax, overflows
   , PathEditError (..), elementAt, replaceAt, spliceChildrenAt, insertChildAt, removeChildAt
   ) where
 
+import Control.Exception (ErrorCall (..), evaluate, try)
 import Data.Bits (finiteBitSize)
+import Data.List (isInfixOf)
 import Data.Char (chr, ord)
 import qualified Data.Text as Text
 import Graft
@@ -74,6 +76,21 @@ byteLength = sum . map width
 -- exceeds any real text but stays below maxBound on 32- and 64-bit Int.
 hugeDepth :: Int
 hugeDepth = finiteBitSize (0 :: Int) - 24
+
+-- A shared DAG of logical length 2 ^ (bits - 2), so that two of them side by
+-- side overflow Int. Never render, compare or deeply force it.
+halfMax :: kind -> GreenElement kind
+halfMax kind = iterate (\child -> Node (Green.node kind [child, child])) (Token (Green.token kind (Text.pack "x")))
+  !! (finiteBitSize (0 :: Int) - 2)
+
+-- Whether evaluating a value to weak head normal form fails with the
+-- length-overflow error, rather than wrapping around or succeeding.
+overflows :: a -> Property
+overflows value = ioProperty $ do
+  result <- try (evaluate value)
+  pure $ case result of
+    Left (ErrorCall message) -> counterexample message ("exceeds maxBound" `isInfixOf` message)
+    Right _ -> counterexample "no overflow error" False
 
 validCaches :: GreenElement Kind -> Bool
 validCaches tree = Green.length tree == byteLength (Text.unpack (Green.render tree))

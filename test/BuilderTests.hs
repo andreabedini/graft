@@ -11,7 +11,7 @@ import qualified Graft.Build as Build
 import qualified Graft.Builder as Builder
 import qualified Graft.Green as Green
 import Test.QuickCheck
-import TestModel (hugeDepth)
+import TestModel (halfMax, hugeDepth, overflows)
 
 -- An independent source-ordered tree, with no caches or builder positions.
 data Tree = Branch Int [Tree] | Leaf Int String
@@ -232,6 +232,8 @@ regressions = once $ conjoin
         let initial = Builder.startNode 9 blank
         Builder.startNodeAt (Builder.checkpoint initial) 8 (Builder.token 1 "b" (Builder.token 1 "a" initial)))
   , show (Builder.empty :: Builder Int) === "Builder.empty"
+  -- Reused subtrees whose lengths overflow fail when the node closes.
+  , overflows (Builder.finishNode (Builder.element (halfMax (1 :: Int)) (Builder.element (halfMax (1 :: Int)) (Builder.startNode 9 Builder.empty))))
   , conjoin
       [ Green.nodeLength hugeRoot === 2 ^ hugeDepth
       , Green.nodeKind hugeRoot === 9

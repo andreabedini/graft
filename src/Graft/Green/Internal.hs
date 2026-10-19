@@ -47,9 +47,9 @@ import GHC.Exts (isTrue#, reallyUnsafePtrEquality#)
 -- and arithmetic work as for 'Int'; use the constructor or 'fromIntegral' to
 -- convert deliberately.
 --
--- Shared subtrees make a logical length exceed the physical text size; sums
--- are not checked for overflow, which needs a logical length beyond
--- @maxBound :: Int@.
+-- Shared subtrees make a logical length exceed the physical text size.
+-- Constructing or editing a node whose length would exceed
+-- @maxBound :: Int@ fails with an error instead of wrapping around.
 newtype TextLength = TextLength Int
   deriving newtype (Eq, Ord, Show, Read, Bounded, Enum, Num, Real, Integral, NFData, Hashable)
 
@@ -146,7 +146,7 @@ greenNode kind children = runST $ do
       fill !index !offset (!child : rest) = do
         writeSmallArray elements index child
         writePrimArray starts index (bytes offset)
-        fill (index + 1) (offset + elementTextLength child) rest
+        fill (index + 1) (addLength offset (elementTextLength child)) rest
   total <- fill 0 0 children
   freeze kind total elements starts
 
@@ -168,7 +168,7 @@ greenNodeReversed kind count reversed = runST $ do
         | otherwise = do
             child <- readSmallArray elements index
             writePrimArray starts index (bytes offset)
-            measure (index + 1) (offset + elementTextLength child)
+            measure (index + 1) (addLength offset (elementTextLength child))
   total <- measure 0 0
   node <- freeze kind total elements starts
   pure (node, remaining)
@@ -184,6 +184,18 @@ bytes (TextLength count) = count
 
 missingChild :: a
 missingChild = error "Graft.Green.Internal: uninitialised child"
+
+-- Lengths are sums of non-negative lengths, so a sum that comes out negative
+-- has overflowed. Shared subtrees can reach that without the text existing,
+-- and a wrapped length would make 'Graft.Green.render' size its buffer
+-- wrongly, so overflow is an error.
+checkedLength :: TextLength -> TextLength
+checkedLength len
+  | len < 0 = error "Graft.Green: a tree's length exceeds maxBound :: Int"
+  | otherwise = len
+
+addLength :: TextLength -> TextLength -> TextLength
+addLength offset len = checkedLength (offset + len)
 
 -- | Construct a token. 'Text' stores UTF-8 internally, so reading the byte
 -- length takes constant time and copies nothing.
@@ -227,7 +239,7 @@ firstChildEndingAtOrAfter node offset = go 0 (childCount node)
 -- lengths agree and shifted otherwise.
 setChild :: Int -> GreenElement kind -> GreenNode kind -> GreenNode kind
 setChild index !replacement node@(GreenNode kind len children starts) =
-  GreenNode kind (len + delta) updated shifted
+  GreenNode kind (checkedLength (len + delta)) updated shifted
   where
     delta = elementTextLength replacement - elementTextLength (childAt node index)
     count = sizeofSmallArray children
@@ -258,7 +270,7 @@ spliceChildrenUnchecked start end replacements node@(GreenNode kind len children
       place !index !offset (!child : rest) = do
         writeSmallArray elements index child
         writePrimArray offsets index (bytes offset)
-        place (index + 1) (offset + elementTextLength child) rest
+        place (index + 1) (addLength offset (elementTextLength child)) rest
   afterInserted <- place start (childStart node start) replacements
   let delta = afterInserted - childStart node end
       shift !position
@@ -269,4 +281,4 @@ spliceChildrenUnchecked start end replacements node@(GreenNode kind len children
             shift (position + 1)
   copySmallArray elements (start + inserted) children end suffix
   shift 0
-  freeze kind (len + delta) elements offsets
+  freeze kind (checkedLength (len + delta)) elements offsets

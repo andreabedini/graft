@@ -73,7 +73,8 @@ import Prelude hiding (length)
 
 -- | A node with a kind and its children in source order, which may be none.
 -- Takes time proportional to the number of children; the children are
--- shared, not copied or traversed.
+-- shared, not copied or traversed. A node whose length would exceed
+-- @maxBound :: Int@, which only shared subtrees can reach, is an error.
 node :: kind -> [GreenElement kind] -> GreenNode kind
 node = Internal.greenNode
 

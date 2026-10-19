@@ -6,6 +6,7 @@ import AstTests (astProperties)
 import BuilderTests (builderProperties)
 import ChildEditTests (childEditProperties)
 import Control.Monad (unless)
+import Data.Bits (finiteBitSize)
 import Data.Hashable (hash)
 import Data.List (find, isPrefixOf)
 import qualified Data.Text as Text
@@ -453,6 +454,27 @@ cursorRegressions = once $ conjoin
       Left err -> error (show err)
     hugeCursor = Cursor.fromGreen (iterate (\child -> Node (Green.node Group [child, child])) (tok "x") !! hugeDepth)
 
+-- Shared subtrees can describe more text than an Int can count. Building or
+-- editing such a node fails instead of wrapping its length, which once let
+-- render write outside its buffer.
+lengthOverflow :: Property
+lengthOverflow = once $ conjoin
+  [ overflows (Green.node Root [half, half])
+  , overflows (Green.node Root [half, Node (Green.node Group [half])])
+  , overflows (edited (Green.replaceChild 1 half (Green.node Root [half, tok "x"])))
+  , overflows (edited (Green.insertChild 1 half (Green.node Root [half])))
+  , overflows (edited (Green.spliceChildren 0 0 [half, half] (Green.node Root [])))
+  , overflows (Cursor.tree (Cursor.replace half (edited (Cursor.at [1] (Cursor.fromGreen (Node (Green.node Root [half, tok "x"])))))))
+  , overflows (Green.render (Node (Green.node Root [half, half, half, half, tok "AB"])))
+  , Green.length half === TextLength (2 ^ (finiteBitSize (0 :: Int) - 2))
+  , Green.length (Node (Green.node Root [half, Node (Green.node Group [])])) === Green.length half
+  ]
+  where
+    half = halfMax Group
+    edited :: Show e => Either e a -> a
+    edited = either (error . show) id
+    tok = Token . Green.token Name
+
 regressions :: Property
 regressions = once $ conjoin
   [ Green.renderNode empty === ""
@@ -476,7 +498,7 @@ regressions = once $ conjoin
       , Token (Green.token Comment "{- keep -}")
       , Node (Green.node Group [tok "\r\n", tok "😀e\x0301\0", tok ""])
       ]
-    -- A tiny shared DAG with a logical size above Word64. Never render it.
+    -- A tiny shared DAG with a logical size of 2 ^ hugeDepth. Never render it.
     huge = iterate (\child -> Node (Green.node Group [child, child])) (tok "x") !! hugeDepth
 
 main :: IO ()
@@ -503,6 +525,7 @@ main = do
     , run "covering range lookup" propCoveringRange
     , run "half-open range invariants" propRanges
     , run "cursor empty, boundary, shared-occurrence and large-range regressions" cursorRegressions
+    , run "length overflow fails instead of wrapping" lengthOverflow
     ] ++ [run title prop | (title, prop) <- builderProperties ++ childEditProperties ++ astProperties ++ lineIndexProperties]
   unless (all isSuccess results) exitFailure
   where
