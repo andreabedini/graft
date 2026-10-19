@@ -139,8 +139,8 @@ fromUtf16Position (Position line column) index@(LineIndex text _)
   where
     end = contentEnd index line
     go !units !position
-      | units == column || position >= end = Just position
       | units > column = Nothing
+      | units == column || position >= end = Just position
       | otherwise = go (units + utf16Units (byteAt text position)) (next position)
     next position
       | position + 1 < end && continuation (byteAt text (position + 1)) = next (position + 1)

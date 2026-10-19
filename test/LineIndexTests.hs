@@ -68,6 +68,14 @@ propInvalid = forAll genText $ \text ->
       , conjoin [fmap positionLine (LineIndex.utf8Position offset index) =/= Nothing | offset <- inside]
       , LineIndex.fromUtf16Position (Position (LineIndex.lineCount index) 0) index === Nothing
       , LineIndex.fromUtf16Position (Position 0 (-1)) index === Nothing
+        -- A column between the two halves of a surrogate pair, including
+        -- one at the end of a line or of the text.
+      , conjoin
+          [ LineIndex.fromUtf16Position (Position (placeLine here) (placeUtf16 here + 1)) index === Nothing
+          | (here, next) <- zip (places text) (drop 1 (places text))
+          , placeLine next == placeLine here
+          , placeUtf16 next == placeUtf16 here + 2
+          ]
       ]
 
 regressions :: Property
@@ -82,11 +90,16 @@ regressions = once $ conjoin
   , LineIndex.utf16Position 5 (LineIndex.fromText (Text.pack "x\x1F600y")) === Just (Position 0 3)
   , LineIndex.fromUtf16Position (Position 0 2) (LineIndex.fromText (Text.pack "x\x1F600y")) === Nothing
   , LineIndex.fromUtf16Position (Position 0 3) (LineIndex.fromText (Text.pack "x\x1F600y")) === Just 5
+  -- A surrogate pair last on its line is not skipped by the clamp.
+  , LineIndex.fromUtf16Position (Position 0 1) (LineIndex.fromText (Text.pack "\x1F600")) === Nothing
+  , LineIndex.fromUtf16Position (Position 0 2) (LineIndex.fromText (Text.pack "a\x1F600\nb")) === Nothing
+  , LineIndex.fromUtf16Position (Position 0 2) (LineIndex.fromText (Text.pack "\x1F600")) === Just 4
+  , LineIndex.fromUtf16Position (Position 0 9) (LineIndex.fromText (Text.pack "\x1F600")) === Just 4
   ]
 
 lineIndexProperties :: [(String, Property)]
 lineIndexProperties =
   [ ("line index positions agree with a String oracle", propPositions)
-  , ("line index rejects offsets inside characters and missing lines", propInvalid)
+  , ("line index rejects offsets inside characters, split surrogates and missing lines", propInvalid)
   , ("line index terminators, clamping and surrogate regressions", regressions)
   ]
