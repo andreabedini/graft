@@ -11,8 +11,10 @@
 -- >>> let range = Range.fromLength 4 3
 -- >>> (Range.start range, Range.end range)
 -- (4,7)
--- >>> map (`Range.contains` range) [3, 4, 6, 7]
+-- >>> map (`Range.member` range) [3, 4, 6, 7]
 -- [False,True,True,False]
+-- >>> Range.fromLength 5 2 `Range.isSubrangeOf` range
+-- True
 -- >>> Range.fromEnds 7 4
 -- Nothing
 module Graft.Range
@@ -23,8 +25,8 @@ module Graft.Range
   , end
   , length
   , isEmpty
-  , contains
-  , containsRange
+  , member
+  , isSubrangeOf
   ) where
 
 import Control.DeepSeq (NFData (..))
@@ -76,10 +78,11 @@ isEmpty range = start range == end range
 
 -- | Whether an offset lies in the range. The end is excluded, so an empty
 -- range contains no offsets.
-contains :: TextLength -> TextRange -> Bool
-contains offset range = start range <= offset && offset < end range
+member :: TextLength -> TextRange -> Bool
+member offset range = start range <= offset && offset < end range
 
--- | @containsRange outer inner@ is whether @inner@ lies within @outer@,
--- including an empty @inner@ at either end of @outer@.
-containsRange :: TextRange -> TextRange -> Bool
-containsRange outer inner = start outer <= start inner && end inner <= end outer
+-- | @isSubrangeOf inner outer@ is whether @inner@ lies within @outer@,
+-- including an empty @inner@ at either end of @outer@. The argument order is
+-- that of 'Data.List.isPrefixOf', so it reads well infix.
+isSubrangeOf :: TextRange -> TextRange -> Bool
+isSubrangeOf inner outer = start outer <= start inner && end inner <= end outer

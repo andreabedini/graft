@@ -384,8 +384,10 @@ propRanges (NonNegative rawStart) (NonNegative rawLen) (NonNegative rawPoint) =
       , Range.length range === len
       , Range.isEmpty range === (len == 0)
       , Range.fromEnds start (start + len) === Just range
-      , Range.contains point range === (start <= point && point < start + len)
-      , Range.containsRange range (Range.fromLength (start + len) 0) === True
+      , Range.member point range === (start <= point && point < start + len)
+      , Range.fromLength (start + len) 0 `Range.isSubrangeOf` range === True
+      , range `Range.isSubrangeOf` Range.fromLength 0 (start + len + 1) === True
+      , Range.fromLength 0 (start + len + 1) `Range.isSubrangeOf` range === False
       , if len > 0 then Range.fromEnds (start + len) start === Nothing else property True
       ]
 

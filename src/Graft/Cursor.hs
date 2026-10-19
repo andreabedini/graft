@@ -340,7 +340,7 @@ tokenAt offset cursor = case take 2 (matching cursor) of
 -- leftmost is chosen. Each level is binary-searched.
 covering :: TextRange -> Cursor kind -> Maybe (Cursor kind)
 covering query cursor
-  | not (Range.containsRange (range cursor) query) = Nothing
+  | not (query `Range.isSubrangeOf` range cursor) = Nothing
   | otherwise = Just (descend cursor)
   where
     descend current@(Cursor focus start edited context) = case focus of
