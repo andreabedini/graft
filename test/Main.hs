@@ -391,6 +391,19 @@ propRanges (NonNegative rawStart) (NonNegative rawLen) (NonNegative rawPoint) =
       , if len > 0 then Range.fromEnds (start + len) start === Nothing else property True
       ]
 
+-- Ranges that would break the start <= end invariant, or start before the
+-- text, are rejected rather than built.
+invalidRanges :: Property
+invalidRanges = once $ conjoin
+  [ failsWith "invalid range" (Range.fromLength 5 (-3))
+  , failsWith "invalid range" (Range.fromLength (-1) 2)
+  , failsWith "invalid range" (Range.fromLength maxBound 1)
+  , Range.end (Range.fromLength 0 maxBound) === maxBound
+  , Range.fromEnds (-5) 3 === Nothing
+  , Range.fromEnds 5 2 === Nothing
+  , Range.fromEnds 0 0 === Just (Range.fromLength 0 0)
+  ]
+
 cursorRegressions :: Property
 cursorRegressions = once $ conjoin
   [ map Cursor.path (Cursor.descendantTokens tree) === [[1, 0], [1, 1], [2], [3, 0], [3, 1], [5], [6]]
@@ -526,6 +539,7 @@ main = do
     , run "boundary-aware token lookup" propCursorOffsetLookup
     , run "covering range lookup" propCoveringRange
     , run "half-open range invariants" propRanges
+    , run "invalid ranges are rejected" invalidRanges
     , run "cursor empty, boundary, shared-occurrence and large-range regressions" cursorRegressions
     , run "length overflow fails instead of wrapping" lengthOverflow
     ] ++ [run title prop | (title, prop) <- builderProperties ++ childEditProperties ++ astProperties ++ lineIndexProperties]

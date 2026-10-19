@@ -34,8 +34,9 @@ import Data.Hashable (Hashable (..))
 import Graft.Green.Internal (TextLength)
 import Prelude hiding (length)
 
--- | A range of byte offsets whose start is no greater than its end. The
--- endpoints need not fall on character boundaries.
+-- | A range of byte offsets whose start is no greater than its end, and
+-- whose start is not negative. The endpoints need not fall on character
+-- boundaries.
 data TextRange = TextRange !TextLength !TextLength
   deriving (Eq, Ord)
 
@@ -53,12 +54,19 @@ instance Hashable TextRange where
 -- | The range from a start to an end, or 'Nothing' if the end comes first.
 fromEnds :: TextLength -> TextLength -> Maybe TextRange
 fromEnds from to
-  | from <= to = Just (TextRange from to)
+  | 0 <= from && from <= to = Just (TextRange from to)
   | otherwise = Nothing
 
--- | The range with a start and a length, which must not be negative.
+-- | The range with a start and a length. A negative start or length, or an
+-- end past @maxBound :: Int@, is an error; use 'fromEnds' to check endpoints
+-- that may be invalid.
 fromLength :: TextLength -> TextLength -> TextRange
-fromLength from len = TextRange from (from + len)
+fromLength from len
+  | from < 0 || len < 0 || to < 0 =
+      error ("Graft.Range.fromLength: invalid range " ++ show from ++ " " ++ show len)
+  | otherwise = TextRange from to
+  where
+    to = from + len
 
 -- | The first offset in the range.
 start :: TextRange -> TextLength

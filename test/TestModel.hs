@@ -1,6 +1,6 @@
 module TestModel
   ( Kind (..), Model (..), scalar, genChar, genText, genKind, genModel
-  , compile, source, byteLength, validCaches, contexts, hugeDepth, halfMax, overflows
+  , compile, source, byteLength, validCaches, contexts, hugeDepth, halfMax, overflows, failsWith
   , PathEditError (..), elementAt, replaceAt, spliceChildrenAt, insertChildAt, removeChildAt
   ) where
 
@@ -86,11 +86,16 @@ halfMax kind = iterate (\child -> Node (Green.node kind [child, child])) (Token 
 -- Whether evaluating a value to weak head normal form fails with the
 -- length-overflow error, rather than wrapping around or succeeding.
 overflows :: a -> Property
-overflows value = ioProperty $ do
+overflows = failsWith "exceeds maxBound"
+
+-- Whether evaluating a value to weak head normal form fails with an error
+-- whose message contains the given text.
+failsWith :: String -> a -> Property
+failsWith expected value = ioProperty $ do
   result <- try (evaluate value)
   pure $ case result of
-    Left (ErrorCall message) -> counterexample message ("exceeds maxBound" `isInfixOf` message)
-    Right _ -> counterexample "no overflow error" False
+    Left (ErrorCall message) -> counterexample message (expected `isInfixOf` message)
+    Right _ -> counterexample ("no error mentioning " ++ show expected) False
 
 validCaches :: GreenElement Kind -> Bool
 validCaches tree = Green.length tree == byteLength (Text.unpack (Green.render tree))
