@@ -162,22 +162,55 @@ Two changes followed the 2026-10-17 run:
   Even on the busy machine, building 10,000 tokens took 158–176 µs, against
   476–483 µs in the 2026-10-17 run.
 
-### Runs of edits (2026-10-19)
+### Recorded edits (2026-10-19)
 
-Two cases replace every child of the wide node: `edit-each-child` moves
-through the children with one cursor, replacing each and stepping to the next
-sibling; `edit-parent-once` rebuilds the node's child list and replaces the
-node once.
+Cursor edits are now recorded in the ancestors and built when read, instead
+of copying the parent on every move away from an edit. These are single
+passes of the affected cases on one machine, before and after the change,
+with GHC 9.12.2, `--stdev 3` and a 32 MiB allocation area, not runs of
+`bench/run.py`. `rename-all` renames each of the 1,000 `Name` tokens of the
+1,000-line document through one cursor, as the `Graft.Cursor` example does;
+`rename-all-ancestors` also reads the ranges of every token's ancestors, as a
+rename that checks scopes would. `edit-each-child` replaces every child of the
+wide node through one cursor.
 
-| Children | Each child through one cursor | The parent once |
-| ---: | ---: | ---: |
-| 100 | 12.7 µs | 2.35 µs |
-| 1,000 | 880 µs | 22.8 µs |
-| 10,000 | 93.0 ms (1.5 GB allocated) | 250 µs |
+| Case | Before | After |
+| --- | ---: | ---: |
+| `rename-all`, 1,000 lines | 1.96 ms, 17 MB allocated | 540 µs, 2.5 MB |
+| `rename-all-ancestors`, 1,000 lines | 8.25 ms, 80 MB | 738 µs, 3.1 MB |
+| `edit-each-child`, 100 children | 22.8 µs | 15.5 µs |
+| `edit-each-child`, 1,000 children | 1.61 ms, 16 MB | 210 µs, 1.0 MB |
+| `edit-each-child`, 10,000 children | 149 ms, 1.5 GB | 2.78 ms, 11 MB |
+| One replacement at depth 10,000, then the tree | 189 µs, 1.0 MB | 222 µs, 1.0 MB |
+| 100 single edits of the document, each followed by the tree | 101 µs | 99.4 µs |
+| Iterate all siblings, 10,000 children | 320 µs | 293 µs |
+| Child by index from a fresh cursor | 3.6–6.3 ns | 39–53 ns |
+| Prepared cursor at depth 10,000 to the root | 23.2 µs | 64.6 µs |
 
-Each step away from an edited child copies the parent's child array, so the
-run is quadratic in the width. The architecture note previously claimed it
-rebuilt each ancestor once; it doesn't.
+Before, each step away from an edited child copied the parent's child array,
+so a run of edits was quadratic in the width, and every climb from below an
+edit that was then thrown away, such as `Cursor.ancestors` on each token,
+copied the ancestors again. Single edits cost the same as before. A cursor is
+now larger, so taking one child of a fresh cursor, which GHC used to reduce to
+almost nothing, allocates, and walking up a very deep cursor is slower.
+
+| Retained result, 1,000 lines | Before | After |
+| --- | ---: | ---: |
+| The tree after renaming every `Name` | 0.428 MB, 18.8 MB allocated | 0.428 MB, 3.7 MB allocated |
+| The cursor on the last token after renaming | 0.429 MB | 0.765 MB |
+
+| The last cursor after 10 renaming passes through one chain of cursors | 0.429 MB | 0.902 MB |
+| The last cursor after 100 passes | 0.429 MB | 0.902 MB |
+| Every cursor that one renaming walk visits | 17.3 MB | 1.81 MB |
+
+At 10,000 lines the renamed tree takes 4.24 MB before and 4.28 MB after,
+with 908 MB and 37 MB allocated, the cursor 4.24 MB before and 7.64 MB
+after, and every visited cursor 893 MB before and 18.7 MB after. A cursor
+keeps the version of each edited node from before the edits, but repeated
+passes don't accumulate older versions: the residency after 10 and 100
+passes is the same. Keeping every cursor of a walk costs far less than
+before, when each cursor that had left an edited line held its own copy of
+the document's child array.
 
 ## What the numbers suggest
 
@@ -186,9 +219,9 @@ rebuilt each ancestor once; it doesn't.
   identical tokens such as `;` or a single space. A node cache
   like Rowan's could share them. Its value depends on duplicate rates in real
   parser output, which haven't been measured.
-- A run of edits through one cursor copies the parent once per edit. Keeping
-  pending replacements in the cursor and applying them on the way up would
-  make it linear, without an API change.
+- A cursor kept after a run of edits holds the original version of each
+  edited node. Building an edited node could drop it, at the cost of making
+  the cursor's fields mutable or rebuilding the cursor.
 - Edits in very wide nodes copy the whole child array. A chunked or
   finger-tree child list would make them logarithmic, at a cost to access and
   memory in the common case.

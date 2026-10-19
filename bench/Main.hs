@@ -145,7 +145,11 @@ documentBench = env (pure (Prepared (Node (documentTree 1000)))) $ \prepared ->
     , bench "100-edits-latest" $ whnf (Green.length . editMany 100 path) tree
     , bench "100-edits-history" $ whnf (List.foldl' (\total snapshot -> total + Green.length snapshot) 0 .
         snapshots 100 path) tree
+    , bench "rename-all" $ whnf (Green.length . renameAll False) tree
+    , bench "rename-all-ancestors" $ whnf (Green.length . renameAll True) tree
     ]
+  where
+    renameAll ancestors input = maybe input Cursor.tree (renameWalk ancestors input)
 
 offsetEnd :: TextLength -> Cursor Kind -> TextLength
 offsetEnd offset root = case Cursor.tokenAt offset root of

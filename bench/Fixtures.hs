@@ -6,7 +6,7 @@ module Fixtures
   ( Kind (..), Prepared (..), PreparedCursor (..), Named (..), Numbered (..), Grouped (..)
   , wideSource, wideTree, deepTree, chainTree, chainSource, documentTree, documentSource
   , forceElement, checked, selected, cached, cursorEnd, siblingSum
-  , buildTokens, buildMonadic, buildReuse, buildWrapped, editMany, snapshots
+  , buildTokens, buildMonadic, buildReuse, buildWrapped, editMany, snapshots, renameWalk, renamePasses, renameVisits
   , checkFixtures
   ) where
 
@@ -159,6 +159,33 @@ editMany count path root = List.foldl' step root [1 .. count]
       let updated = Cursor.tree (Cursor.replace (Token (Green.token Number (Text.pack (show index))))
             (checked (Cursor.at path (Cursor.fromGreen previous))))
       in Green.length updated `seq` updated
+
+-- Rename every Name token through one cursor, as in the Graft.Cursor
+-- example, and return the cursor on the last token. With ancestors, every
+-- token also reads the ranges of its ancestors first, as a rename that
+-- checks scopes would.
+renameWalk :: Bool -> GreenElement Kind -> Maybe (Cursor Kind)
+renameWalk ancestors input = fmap List.last (renameVisits ancestors (Cursor.fromGreen input))
+
+-- Every cursor that a renaming walk from the root visits, after any edit.
+renameVisits :: Bool -> Cursor Kind -> Maybe [Cursor Kind]
+renameVisits ancestors start = go <$> Cursor.firstToken (Cursor.root start)
+  where
+    go cursor = renamed : maybe [] go (Cursor.nextToken renamed)
+      where
+        renamed
+          | (not ancestors || ancestorEnds cursor > 0) && Cursor.kind cursor == Name =
+              Cursor.replace (Token (Green.token Name "renamed")) cursor
+          | otherwise = cursor
+    ancestorEnds = List.foldl' (\total ancestor -> total + cursorEnd ancestor) 0 . Cursor.ancestors
+
+-- The renaming walk repeated through one chain of cursors, each pass
+-- starting from the root of the last cursor of the previous one.
+renamePasses :: Int -> GreenElement Kind -> Cursor Kind
+renamePasses count input = List.foldl' pass (Cursor.fromGreen input) [1 .. count]
+  where
+    pass cursor _ = let next = maybe cursor List.last (renameVisits False cursor)
+      in cursorEnd next `seq` next
 
 snapshots :: Int -> Path -> GreenElement Kind -> [GreenElement Kind]
 snapshots count path root = scanl step root [1 .. count]

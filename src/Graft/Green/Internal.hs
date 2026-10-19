@@ -25,7 +25,9 @@ module Graft.Green.Internal
   , childStart
   , firstChildEndingAtOrAfter
     -- * Unchecked updates
+  , checkedLength
   , setChild
+  , setChildren
   , spliceChildrenUnchecked
   ) where
 
@@ -261,6 +263,27 @@ setChild index !replacement node@(GreenNode kind len children starts) =
       | otherwise = generatePrimArray count $ \position ->
           let start = indexPrimArray starts position
           in if position <= index then start else start + bytes delta
+
+-- | Replace the children at valid indices, given in increasing order, with
+-- one copy of the child array. Offsets before the first replacement are
+-- copied, and the rest are recomputed.
+setChildren :: [(Int, GreenElement kind)] -> GreenNode kind -> GreenNode kind
+setChildren [] node = node
+setChildren [(index, replacement)] node = setChild index replacement node
+setChildren replacements@((first, _) : _) node@(GreenNode kind _ children starts) = runST $ do
+  let count = sizeofSmallArray children
+  elements <- thawSmallArray children 0 count
+  mapM_ (\(index, !replacement) -> writeSmallArray elements index replacement) replacements
+  offsets <- newPrimArray count
+  copyPrimArray offsets 0 starts 0 first
+  let measure !index !offset
+        | index == count = pure offset
+        | otherwise = do
+            child <- readSmallArray elements index
+            writePrimArray offsets index (bytes offset)
+            measure (index + 1) (addLength offset (elementTextLength child))
+  total <- measure first (childStart node first)
+  freeze kind total elements offsets
 
 -- | Replace the children in @[start, end)@, which must satisfy
 -- @0 <= start <= end <= childCount node@. Offsets before the range are
