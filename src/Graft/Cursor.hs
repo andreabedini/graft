@@ -129,10 +129,12 @@ instance NFData kind => NFData (Cursor kind) where
       go Top = ()
       go (Crumb above _ _ outer _) = rnf above `seq` go outer
 
+-- | Shows the path, range and focus. Cursors have no public constructor, so
+-- unlike the green types this output does not rebuild the value.
 instance Show kind => Show (Cursor kind) where
   showsPrec precedence cursor = showParen (precedence > 10) $
-    showString "Cursor " . shows (path cursor) . showChar ' '
-      . shows (range cursor) . showChar ' ' . shows (green cursor)
+    showString "Cursor " . showsPrec 11 (path cursor) . showChar ' '
+      . showsPrec 11 (range cursor) . showChar ' ' . showsPrec 11 (green cursor)
 
 -- | A cursor on the root of a tree, at offset zero. The root may be a token.
 fromGreen :: GreenElement kind -> Cursor kind

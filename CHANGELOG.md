@@ -19,4 +19,5 @@ Initial release.
 * A line index for line and column positions, in UTF-8 bytes or UTF-16 code
   units, with a separate position type for each unit.
 * `NFData`, `Hashable` and `Exception` instances, and `Functor` over kinds for
-  green trees. `Show` prints the calls that rebuild abstract values.
+  green trees. `Show` prints the calls that rebuild green trees, ranges,
+  builders and line indexes.

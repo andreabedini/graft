@@ -435,6 +435,9 @@ cursorRegressions = once $ conjoin
   , offsetPaths (Cursor.tokenAt 0 (Cursor.fromGreen (tok ""))) === NoToken
   , fmap Cursor.path (Cursor.firstToken (Cursor.fromGreen (tok ""))) === Just []
   , Cursor.range sharedSecond === Range.fromLength 1 1
+  -- A cursor shows its parts with the parentheses each needs.
+  , fmap show (Cursor.childAt 1 (Cursor.fromGreen (Node (Green.node Root [tok "a", tok "b"]))))
+      === Right "Cursor [1] (Range.fromLength 1 1) (Token (Green.token Name \"b\"))"
   -- Abstract values show as the public calls that rebuild them.
   , show (Just (Range.fromLength 5 3)) === "Just (Range.fromLength 5 3)"
   , show (Node (Green.node Group [Token (Green.token Space "\t")]))
