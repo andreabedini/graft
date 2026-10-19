@@ -189,7 +189,9 @@ UTF-8 bytes or in UTF-16 code units, the Language Server Protocol's default,
 and each unit has its own position type, so a column in one can't be passed
 where the other is expected.
 Lines end at `\n`, `\r\n` or a lone `\r`, as in that protocol, and columns past
-the end of a line clamp to it. An index describes one text and must be rebuilt
+the end of a line clamp to it. An offset or column inside a character, in
+either unit, is rejected rather than rounded, so a converted offset is always a
+character boundary. An index describes one text and must be rebuilt
 after an edit.
 
 ## Testing

@@ -114,24 +114,29 @@ lineStart line (LineIndex _ starts)
   | line < 0 || line >= sizeofPrimArray starts = Nothing
   | otherwise = Just (TextLength (indexPrimArray starts line))
 
--- | Line and UTF-8 byte column of an offset in @[0, length]@. Any byte offset
--- is accepted, including one inside a multibyte character.
+-- | Line and UTF-8 byte column of an offset in @[0, length]@, or 'Nothing' if
+-- the offset lies outside the text or inside a multibyte character.
 utf8Position :: TextLength -> LineIndex -> Maybe Utf8Position
 utf8Position (TextLength offset) index@(LineIndex text _)
   | offset < 0 || offset > textBytes text = Nothing
+  | offset < textBytes text && continuation (byteAt text offset) = Nothing
   | otherwise = Just (Utf8Position line (offset - startOf index line))
   where
     line = lineOf offset index
 
 -- | Offset of a line and UTF-8 byte column. A column past the end of the
--- line's content is clamped to it, as the Language Server Protocol requires;
--- a line that does not exist returns 'Nothing'.
+-- line's content is clamped to it, as the Language Server Protocol requires.
+-- Returns 'Nothing' for a line that does not exist or a column that falls
+-- inside a multibyte character, so the result is always a character boundary.
 fromUtf8Position :: Utf8Position -> LineIndex -> Maybe TextLength
-fromUtf8Position (Utf8Position line column) index
+fromUtf8Position (Utf8Position line column) index@(LineIndex text _)
   | line < 0 || line >= lineCount index || column < 0 = Nothing
-  | otherwise = Just (TextLength (start + min column (contentEnd index line - start)))
+  | position < end && continuation (byteAt text position) = Nothing
+  | otherwise = Just (TextLength position)
   where
     start = startOf index line
+    end = contentEnd index line
+    position = start + min column (end - start)
 
 -- | Line and UTF-16 column of an offset in @[0, length]@, or 'Nothing' if the
 -- offset lies outside the text or inside a multibyte character.

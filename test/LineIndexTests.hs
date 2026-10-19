@@ -65,7 +65,7 @@ propInvalid = forAll genText $ \text ->
       , LineIndex.utf8Position (size + 1) index === Nothing
       , LineIndex.utf16Position (size + 1) index === Nothing
       , conjoin [LineIndex.utf16Position offset index === Nothing | offset <- inside]
-      , conjoin [fmap utf8Line (LineIndex.utf8Position offset index) =/= Nothing | offset <- inside]
+      , conjoin [LineIndex.utf8Position offset index === Nothing | offset <- inside]
       , LineIndex.fromUtf16Position (Utf16Position (LineIndex.lineCount index) 0) index === Nothing
       , LineIndex.fromUtf16Position (Utf16Position 0 (-1)) index === Nothing
         -- A column between the two halves of a surrogate pair, including
@@ -75,6 +75,13 @@ propInvalid = forAll genText $ \text ->
           | (here, next) <- zip (places text) (drop 1 (places text))
           , placeLine next == placeLine here
           , placeUtf16 next == placeUtf16 here + 2
+          ]
+        -- A UTF-8 column inside a multibyte character.
+      , conjoin
+          [ LineIndex.fromUtf8Position (Utf8Position (placeLine here) (placeUtf8 here + k)) index === Nothing
+          | (here, next) <- zip (places text) (drop 1 (places text))
+          , placeLine next == placeLine here
+          , k <- [1 .. placeUtf8 next - placeUtf8 here - 1]
           ]
       ]
 
@@ -90,6 +97,10 @@ regressions = once $ conjoin
   , LineIndex.utf16Position 5 (LineIndex.fromText (Text.pack "x\x1F600y")) === Just (Utf16Position 0 3)
   , LineIndex.fromUtf16Position (Utf16Position 0 2) (LineIndex.fromText (Text.pack "x\x1F600y")) === Nothing
   , LineIndex.fromUtf16Position (Utf16Position 0 3) (LineIndex.fromText (Text.pack "x\x1F600y")) === Just 5
+  -- UTF-8 columns and offsets inside a character are rejected, as UTF-16 ones are.
+  , LineIndex.fromUtf8Position (Utf8Position 0 2) (LineIndex.fromText (Text.pack "\x1F600x")) === Nothing
+  , LineIndex.fromUtf8Position (Utf8Position 0 4) (LineIndex.fromText (Text.pack "\x1F600x")) === Just 4
+  , LineIndex.utf8Position 2 (LineIndex.fromText (Text.pack "\x1F600x")) === Nothing
   -- A surrogate pair last on its line is not skipped by the clamp.
   , LineIndex.fromUtf16Position (Utf16Position 0 1) (LineIndex.fromText (Text.pack "\x1F600")) === Nothing
   , LineIndex.fromUtf16Position (Utf16Position 0 2) (LineIndex.fromText (Text.pack "a\x1F600\nb")) === Nothing
@@ -100,6 +111,6 @@ regressions = once $ conjoin
 lineIndexProperties :: [(String, Property)]
 lineIndexProperties =
   [ ("line index positions agree with a String oracle", propPositions)
-  , ("line index rejects offsets inside characters, split surrogates and missing lines", propInvalid)
+  , ("line index rejects offsets and columns inside characters, and missing lines", propInvalid)
   , ("line index terminators, clamping and surrogate regressions", regressions)
   ]
