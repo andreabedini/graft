@@ -2,6 +2,8 @@
 
 module Main (main) where
 
+import Control.DeepSeq (rnf)
+import Data.Hashable (hash)
 import qualified Data.List as List
 import qualified Data.Text as Text
 import Fixtures
@@ -68,6 +70,8 @@ wideBench size = bgroup (show size)
               rebuild token = token
       in bgroup "prepared"
         [ bench "render" $ nf Green.render tree
+        , bench "hash" $ whnf hash tree
+        , bench "rnf" $ whnf rnf tree
         , bench "builder-reuse" $ whnf (cached . buildReuse) node
         , bench "builder-checkpoint" $ whnf (cached . buildWrapped) node
         , bench "child-first" $ whnf (endAt 0) tree
@@ -104,6 +108,8 @@ deepBench depth = bgroup (show depth)
           replacement = Token (Green.token Number (Text.singleton '2'))
       in bgroup "prepared"
         [ bench "render" $ nf Green.render tree
+        , bench "hash" $ whnf hash tree
+        , bench "rnf" $ whnf rnf tree
         , bench "descend" $ whnf (cursorEnd . focused) tree
         , bench "replace-path" $ whnf (Green.length . Cursor.tree . Cursor.replace replacement
             . checked . (`Cursor.at` Cursor.fromGreen tree)) path
@@ -123,7 +129,10 @@ chainBench count = env (pure (Prepared (Node (chainTree count)))) $ \prepared ->
   let tree = preparedTree prepared
       end = Green.length tree
   in bgroup (show count)
-    [ bench "tokens" $ whnf (List.foldl' (\total cursor -> total + cursorEnd cursor) 0 . Cursor.descendantTokens . Cursor.fromGreen) tree
+    [ bench "render" $ nf Green.render tree
+    , bench "hash" $ whnf hash tree
+    , bench "rnf" $ whnf rnf tree
+    , bench "tokens" $ whnf (List.foldl' (\total cursor -> total + cursorEnd cursor) 0 . Cursor.descendantTokens . Cursor.fromGreen) tree
     , bench "descendants" $ whnf (length . Cursor.descendants . Cursor.fromGreen) tree
     , bench "offset-first" $ whnf (offsetEnd 1 . Cursor.fromGreen) tree
     , bench "offset-last" $ whnf (offsetEnd (end - 1) . Cursor.fromGreen) tree
@@ -137,6 +146,8 @@ documentBench = env (pure (Prepared (Node (documentTree 1000)))) $ \prepared ->
   in bgroup "document-1000"
     [ bench "construct" $ whnf (cached . documentTree) 1000
     , bench "render" $ nf Green.render tree
+    , bench "hash" $ whnf hash tree
+    , bench "rnf" $ whnf rnf tree
     , bench "tokens" $ whnf (List.foldl' (\total cursor -> total + cursorEnd cursor) 0 . Cursor.descendantTokens . Cursor.fromGreen) tree
     , bench "typed-first-group" $ whnf (maybe 0 (cursorEnd . nodeSyntax) .
         (Ast.child :: Cursor Kind -> Maybe Grouped)) root
