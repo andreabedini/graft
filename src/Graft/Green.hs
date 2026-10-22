@@ -27,6 +27,19 @@
 -- Just (Token (Green.token Punct "("))
 -- >>> Green.renderNode <$> Green.replaceChild 2 (tok Name "x") call
 -- Right "f(x)"
+--
+-- 'fold' and 'traverse' cover the whole tree, so most whole-tree functions
+-- are one line:
+--
+-- >>> import qualified Data.Text as Text
+-- >>> import Data.Functor.Identity (Identity (..))
+-- >>> Green.fold (const 1) (const sum) call :: Int
+-- 4
+-- >>> Green.fold Green.text (const Text.concat) call
+-- "f( )"
+-- >>> let upper t = Green.token (Green.tokenKind t) (Text.toUpper (Green.text t))
+-- >>> Green.renderNode (runIdentity (Green.traverse (Identity . upper) call))
+-- "F( )"
 module Graft.Green
   ( -- * Trees
     GreenNode
@@ -51,6 +64,9 @@ module Graft.Green
     -- * Rendering
   , render
   , renderNode
+    -- * Folding and traversing
+  , fold
+  , traverse
     -- * Editing children
   , ChildEditError (..)
   , replaceChild
@@ -69,7 +85,8 @@ import qualified Data.Text.Array as Array
 import qualified Data.Text.Internal as Text (Text (..))
 import Graft.Green.Internal (GreenElement (..), GreenNode (..), GreenToken (..), TextLength (..), textLengthOf)
 import qualified Graft.Green.Internal as Internal
-import Prelude hiding (length)
+import qualified Data.Traversable as Traversable
+import Prelude hiding (length, traverse)
 
 -- | A node with a kind and its children in source order, which may be none.
 -- Takes time proportional to the number of children; the children are
@@ -147,6 +164,50 @@ render element
 -- | The source text of a node, as 'render'.
 renderNode :: GreenNode kind -> Text
 renderNode = render . Node
+
+-- | Fold a tree bottom-up. The first function receives each token; the
+-- second receives the kind of each node and the results for its children,
+-- in source order.
+--
+-- The list of results is lazy, so a function that does not need every
+-- child does not visit the rest. A subtree shared in several places is
+-- folded at each of them.
+--
+-- 'renderNode' is @fold text (const Text.concat)@, but faster:
+-- 'renderNode' writes into one buffer, while that fold copies each byte
+-- again at every enclosing node.
+fold :: (GreenToken kind -> r) -> (kind -> [r] -> r) -> GreenNode kind -> r
+fold onToken onNode = go
+  where
+    go (GreenNode nodeKind' _ elements _) = onNode nodeKind' (map element (toList elements))
+    element (Token token') = onToken token'
+    element (Node child) = go child
+
+-- | Apply an action to every token, from left to right, and rebuild the
+-- tree from the results. The node kinds and the shape of the tree stay the
+-- same. The lengths and offsets of every node are measured again, so the
+-- action can change the text of a token freely.
+--
+-- This is a van Laarhoven traversal, @Traversal' (GreenNode kind)
+-- (GreenToken kind)@ in the terms of the lens and optics libraries, and it
+-- satisfies the traversal laws. Some instances:
+--
+-- * With @Identity@ it maps the tokens, for example to copy their text out
+--   of a large source buffer with 'Text.copy'. Every node is rebuilt, and a
+--   subtree shared in several places is rebuilt at each of them, so the
+--   result shares nothing with the input.
+-- * With @Const@ it folds over the tokens and builds no nodes.
+-- * With @State@ it threads a value through the tokens in source order.
+traverse
+  :: Applicative f
+  => (GreenToken kind -> f (GreenToken kind))
+  -> GreenNode kind -> f (GreenNode kind)
+traverse action = go
+  where
+    go (GreenNode nodeKind' _ elements _) =
+      Internal.greenNodeFromArray nodeKind' <$> Traversable.traverse element elements
+    element (Token token') = Token <$> action token'
+    element (Node child) = Node <$> go child
 
 writeElement :: Array.MArray s -> Int -> GreenElement kind -> ST s ()
 writeElement target !offset (Token (GreenToken _ (TextLength len) (Text.Text source start _))) =
