@@ -4,7 +4,9 @@ module FoldTests (foldProperties) where
 
 import Data.Functor.Compose (Compose (..))
 import Data.Functor.Const (Const (..))
+import Control.DeepSeq (rnf)
 import Data.Functor.Identity (Identity (..))
+import Data.Hashable (hash)
 import qualified Data.Text as Text
 import Graft
 import qualified Graft.Cursor as Cursor
@@ -83,6 +85,28 @@ propFoldMForcesAccumulator model =
   in not (null (leaves model)) ==>
        failsWith "forced" (runIdentity (Green.foldM step 0 (compile (Branch Root [model, Branch Group []]))))
 
+-- The hash depends on how the nodes nest, not only on the tokens and the
+-- kinds in order.
+propHashKeepsNesting :: Property
+propHashKeepsNesting = once $
+  let tok text = Token (Green.token 'n' text)
+      early = Green.node 'r' [Node (Green.node 'g' [tok "a"]), tok "b"]
+      late = Green.node 'r' [Node (Green.node 'g' [tok "a", tok "b"])]
+  in counterexample "same hash for different nesting" (hash early /= hash late)
+
+-- Forcing a tree forces every kind, including a token on its own, the last
+-- token of a node, and a nested node.
+propForcesEveryKind :: Property
+propForcesEveryKind = once $ conjoin
+  [ failsWith "forced" (rnf (Token (bad "x")))
+  , failsWith "forced" (rnf (Node (Green.node (Just 'r') [Token (good "a"), Token (bad "b")])))
+  , failsWith "forced" (rnf (Node (Green.node (Just 'r') [Node (Green.node (Just (error "forced")) [])])))
+  , rnf (Node (Green.node (Just 'r') [Token (good "a")])) === ()
+  ]
+  where
+    good = Green.token (Just 'n')
+    bad = Green.token (Just (error "forced" :: Char))
+
 propMapIsTraverse :: Model -> Property
 propMapIsTraverse model =
   let tree = rooted model
@@ -121,6 +145,8 @@ foldProperties =
   [ ("foldM visits the descendants in preorder", property propFoldMOrder)
   , ("foldM stops at the first failure", property propFoldMStops)
   , ("foldM forces the accumulator before each step", property propFoldMForcesAccumulator)
+  , ("hashes keep the nesting", propHashKeepsNesting)
+  , ("forcing a tree forces every kind", propForcesEveryKind)
   , ("fold rebuilds the model", property propFoldRebuildsModel)
   , ("fold with concatenation renders", property propFoldRendering)
   , ("fold visits only the children it needs", propFoldIsLazy)
