@@ -25,6 +25,8 @@ module Graft.Green.Internal
   , childAt
   , childStart
   , firstChildEndingAtOrAfter
+    -- * Folding
+  , foldM
     -- * Unchecked updates
   , checkedLength
   , setChild
@@ -184,6 +186,28 @@ greenNodeReversed kind count reversed = runST $ do
   total <- measure 0 0
   node <- freeze kind total elements starts
   pure (node, remaining)
+
+-- | A strict, monadic left fold over a tree's elements in preorder: each
+-- element, then its children in source order. The accumulator is evaluated
+-- to weak head normal form before each step. The loop runs over the child
+-- arrays by index and folds the last child of each node by a tail call, so a
+-- chain of single-child nodes runs in constant stack.
+foldM :: Monad m => (b -> GreenElement kind -> m b) -> b -> GreenElement kind -> m b
+foldM step = element
+  where
+    element !acc current = case current of
+      Token _ -> step acc current
+      Node (GreenNode _ _ elements _) ->
+        step acc current >>= \ !entered -> children entered elements 0
+    children !acc elements !index
+      | index >= count = pure acc
+      | index == count - 1 = element acc (indexSmallArray elements index)
+      | otherwise =
+          element acc (indexSmallArray elements index) >>= \ !next ->
+            children next elements (index + 1)
+      where
+        count = sizeofSmallArray elements
+{-# INLINE foldM #-}
 
 -- | Construct a node from an array of children, measuring each child once.
 greenNodeFromArray :: kind -> SmallArray (GreenElement kind) -> GreenNode kind
