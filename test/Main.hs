@@ -6,6 +6,7 @@ import AstTests (astProperties)
 import BuilderTests (builderProperties)
 import ChildEditTests (childEditProperties)
 import CursorEditTests (cursorEditProperties)
+import FoldTests (foldProperties)
 import Control.Monad (unless)
 import Data.Bits (finiteBitSize)
 import Data.Hashable (hash)
@@ -557,7 +558,7 @@ main = do
     , run "error values are strict in their positions" strictErrors
     , run "cursor empty, boundary, shared-occurrence and large-range regressions" cursorRegressions
     , run "length overflow fails instead of wrapping" lengthOverflow
-    ] ++ [run title prop | (title, prop) <- builderProperties ++ childEditProperties ++ cursorEditProperties ++ astProperties ++ lineIndexProperties]
+    ] ++ [run title prop | (title, prop) <- builderProperties ++ childEditProperties ++ cursorEditProperties ++ foldProperties ++ astProperties ++ lineIndexProperties]
   unless (all isSuccess results) exitFailure
   where
     run title prop = do

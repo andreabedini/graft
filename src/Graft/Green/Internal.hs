@@ -17,6 +17,7 @@ module Graft.Green.Internal
     -- * Construction
   , greenNode
   , greenNodeReversed
+  , greenNodeFromArray
   , greenToken
     -- * Children
   , elementTextLength
@@ -183,6 +184,19 @@ greenNodeReversed kind count reversed = runST $ do
   total <- measure 0 0
   node <- freeze kind total elements starts
   pure (node, remaining)
+
+-- | Construct a node from an array of children, measuring each child once.
+greenNodeFromArray :: kind -> SmallArray (GreenElement kind) -> GreenNode kind
+greenNodeFromArray kind children = runST $ do
+  let count = sizeofSmallArray children
+  starts <- newPrimArray count
+  let measure !index !offset
+        | index == count = pure offset
+        | otherwise = do
+            writePrimArray starts index (bytes offset)
+            measure (index + 1) (addLength offset (elementTextLength (indexSmallArray children index)))
+  total <- measure 0 0
+  GreenNode kind total children <$> unsafeFreezePrimArray starts
 
 freeze
   :: kind -> TextLength -> SmallMutableArray s (GreenElement kind) -> MutablePrimArray s Int
