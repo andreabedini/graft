@@ -36,8 +36,8 @@ module Graft.Green.Internal
 
 import Control.DeepSeq (NFData (..))
 import Control.Monad.ST (ST, runST)
+import Data.Functor.Identity (Identity (..))
 import Data.Foldable (toList)
-import qualified Data.Foldable as Foldable
 import Data.Hashable (Hashable (..))
 import Data.Primitive.PrimArray
 import Data.Primitive.SmallArray
@@ -99,28 +99,38 @@ instance Eq kind => Eq (GreenNode kind) where
 
 -- | Visits a subtree shared in several places at each of them.
 instance NFData kind => NFData (GreenNode kind) where
-  rnf (GreenNode kind _ children _) = rnf kind `seq` foldr (\child rest -> rnf child `seq` rest) () children
+  rnf node = rnf (Node node)
 
 instance NFData kind => NFData (GreenToken kind) where
   rnf (GreenToken kind _ text) = rnf kind `seq` rnf text
 
+-- | Forces every kind and every token's text with one walk of the tree.
 instance NFData kind => NFData (GreenElement kind) where
-  rnf (Node node) = rnf node
-  rnf (Token token) = rnf token
+  rnf tree = runIdentity (foldM (\() element -> Identity (force element)) () tree)
+    where
+      force (Node (GreenNode kind _ _ _)) = rnf kind
+      force (Token token) = rnf token
 
--- | Hashes the kind, the length and every child, so hashing takes time
--- proportional to the size of the tree written out in full, with a shared
--- subtree hashed at each place it appears; hashes are not cached.
+-- | Hashes the kind and number of children of every node, and every token,
+-- so hashing takes time proportional to the size of the tree written out in
+-- full, with a shared subtree hashed at each place it appears; hashes are not
+-- cached.
 instance Hashable kind => Hashable (GreenNode kind) where
-  hashWithSalt salt (GreenNode kind len children _) =
-    Foldable.foldl' hashWithSalt (salt `hashWithSalt` kind `hashWithSalt` len) children
+  hashWithSalt salt node = hashWithSalt salt (Node node)
 
 instance Hashable kind => Hashable (GreenToken kind) where
   hashWithSalt salt (GreenToken kind _ text) = salt `hashWithSalt` kind `hashWithSalt` text
 
+-- | One preorder fold over the tree. Each node contributes its kind and its
+-- number of children, and a preorder sequence with the number of children of
+-- each node determines the tree, so the nesting is part of the hash. Lengths
+-- are left out: the tokens' text already determines them.
 instance Hashable kind => Hashable (GreenElement kind) where
-  hashWithSalt salt (Node node) = salt `hashWithSalt` (0 :: Int) `hashWithSalt` node
-  hashWithSalt salt (Token token) = salt `hashWithSalt` (1 :: Int) `hashWithSalt` token
+  hashWithSalt salt tree = runIdentity (foldM (\current element -> Identity (mix current element)) salt tree)
+    where
+      mix current (Node (GreenNode kind _ children _)) =
+        current `hashWithSalt` (0 :: Int) `hashWithSalt` kind `hashWithSalt` sizeofSmallArray children
+      mix current (Token token) = current `hashWithSalt` (1 :: Int) `hashWithSalt` token
 
 -- | Maps every kind in the tree, reusing the cached lengths and offsets. A
 -- subtree shared in several places is mapped at each of them, and the

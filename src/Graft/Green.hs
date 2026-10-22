@@ -161,7 +161,7 @@ render element
   | total == 0 = Text.empty
   | otherwise = runST $ do
       target <- Array.new bytes
-      writeElement target 0 element
+      _ <- foldM (write target) 0 element
       result <- Array.unsafeFreeze target
       pure (Text.Text result 0 bytes)
   where
@@ -171,6 +171,14 @@ render element
 -- | The source text of a node, as 'render'.
 renderNode :: GreenNode kind -> Text
 renderNode = render . Node
+
+-- Copies each token into the buffer at the offset reached so far.
+write :: Array.MArray s -> Int -> GreenElement kind -> ST s Int
+write target !offset (Token (GreenToken _ (TextLength len) (Text.Text source start _))) = do
+  Array.copyI len target offset source start
+  pure (offset + len)
+write _ offset (Node _) = pure offset
+{-# INLINE write #-}
 
 -- | A strict left fold over a tree's elements in preorder, in any monad:
 -- each element, then its children in source order, as @Graft.Cursor.descendants@
@@ -185,6 +193,8 @@ renderNode = render . Node
 -- or text written into a buffer. Track the offset in the accumulator if you
 -- need positions. A subtree shared in several places is folded at each of
 -- them.
+--
+-- The library renders, forces and hashes trees with this function.
 foldM :: Monad m => (b -> GreenElement kind -> m b) -> b -> GreenElement kind -> m b
 foldM = Internal.foldM
 {-# INLINE foldM #-}
@@ -252,24 +262,6 @@ traverse action = go
       Internal.greenNodeFromArray nodeKind' <$> Traversable.traverse element elements
     element (Token token') = Token <$> action token'
     element (Node child) = Node <$> go child
-
-writeElement :: Array.MArray s -> Int -> GreenElement kind -> ST s ()
-writeElement target !offset (Token (GreenToken _ (TextLength len) (Text.Text source start _))) =
-  Array.copyI len target offset source start
-writeElement target !offset (Node parent) = writeChildren target offset parent 0
-
--- The last child is written by a tail call, so a chain of single-child nodes
--- runs in constant stack.
-writeChildren :: Array.MArray s -> Int -> GreenNode kind -> Int -> ST s ()
-writeChildren target !offset parent !index
-  | index >= count = pure ()
-  | index == count - 1 = writeElement target (childOffset index) (Internal.childAt parent index)
-  | otherwise = do
-      writeElement target (childOffset index) (Internal.childAt parent index)
-      writeChildren target offset parent (index + 1)
-  where
-    count = Internal.childCount parent
-    childOffset position = offset + fromIntegral (Internal.childStart parent position)
 
 -- | Why a child edit failed. 'CannotEditTokenChildren' means the target is a
 -- token; the others report a bad child position (or both positions of a

@@ -82,6 +82,7 @@ test-suite graft-tests
     hs-source-dirs:   test
     build-depends:
         base >=4.19 && <4.23,
+        deepseq >=1.5 && <1.6,
         graft,
         hashable >=1.4 && <1.6,
         QuickCheck >=2.14 && <2.20,
