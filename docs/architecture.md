@@ -166,19 +166,33 @@ the pure builder.
 
 ## Typed views
 
-`AstNode` and `AstToken` are classes for application-defined views. A view is
-usually a newtype over a cursor with a fallible cast; it adds typed accessors
-without building a second tree, so every view keeps its exact text, trivia,
-range and context. Each class has an associated kind type, replacing Rowan's
-language parameter.
+`AstView` is the class for application-defined views. A view is usually a
+newtype over a cursor. `fromCursor` casts a cursor to the view and can fail;
+`toCursor` gives the cursor back. The class has the same shape as `Exception`,
+with `Cursor` in the place of `SomeException`. It has an associated kind type,
+which replaces Rowan's language parameter. Views add typed accessors without a
+second tree, so every view keeps its exact text, trivia, range and context.
+
+The empty subclasses `AstNode` and `AstToken` say whether a view is of nodes or
+of tokens. `Ast.child`, `Ast.children`, `Ast.parent` and `Ast.ancestors` need
+an `AstNode` view; `Ast.token` and `Ast.tokens` need an `AstToken` view. Each
+view therefore has two instances: the `AstView` instance with the cast, and an
+empty `AstNode` or `AstToken` instance.
+
+The set of views is open. Graft can't know an application's kinds, and an
+application can define more than one view for the same kind, or add views in a
+package other than the one that defines the kind type. A type class allows
+both. Within one application the kind type is an ordinary closed type, so a
+cast that matches on the kind gets the usual exhaustiveness checks.
 
 A cast checks the element's form and kind, not the grammar. A view of an
 expression with a missing operand still exists, and its accessor for that
 operand returns `Nothing`. Required fields, duplicates and token spelling are
 the application's to check. The classes have laws (a cast looks only at the
-element, not its position; it keeps the cursor; and casting a view's syntax
-succeeds again) that the type system can't
-enforce; `Ast.matchNode` and `Ast.matchToken` implement the usual instance.
+element, not its position; it keeps the cursor; casting a view's cursor
+succeeds again; a node view rejects tokens and a token view rejects nodes) that
+the type system can't enforce; `Ast.matchNode` and `Ast.matchToken` implement
+the usual `fromCursor`.
 
 `examples/ExactUpdate.hs` uses views for a semantic update: it reads a number's
 value, keeps the original token when the value is unchanged, so `001` stays
@@ -223,7 +237,7 @@ and [formatting][tidy] tests.
 | Separate node and token cursors, optionally mutable | One immutable cursor type; edits return a new cursor |
 | Mutable builder that asserts on misuse | Pure builder with structured errors, and a `Build` monad |
 | Node cache for interning | No interning |
-| `AstNode` trait, `AstChildren` iterator, `SyntaxNodePtr` | `AstNode` and `AstToken` classes and lazy lists; no location pointers |
+| `AstNode` and `AstToken` traits, `AstChildren` iterator, `SyntaxNodePtr` | An `AstView` class with `AstNode` and `AstToken` subclasses, and lazy lists; no location pointers |
 
 ## Open questions
 

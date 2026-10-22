@@ -45,22 +45,25 @@ forceElement :: GreenElement Kind -> ()
 forceElement = rnf
 
 newtype Named = Named (Cursor Kind)
-instance AstToken Named where
-  type AstTokenKind Named = Kind
-  castToken = Ast.matchToken (== Name) Named
-  tokenSyntax (Named cursor) = cursor
+instance AstView Named where
+  type AstViewKind Named = Kind
+  fromCursor = Ast.matchToken (== Name) Named
+  toCursor (Named cursor) = cursor
+instance AstToken Named
 
 newtype Numbered = Numbered (Cursor Kind)
-instance AstToken Numbered where
-  type AstTokenKind Numbered = Kind
-  castToken = Ast.matchToken (== Number) Numbered
-  tokenSyntax (Numbered cursor) = cursor
+instance AstView Numbered where
+  type AstViewKind Numbered = Kind
+  fromCursor = Ast.matchToken (== Number) Numbered
+  toCursor (Numbered cursor) = cursor
+instance AstToken Numbered
 
 newtype Grouped = Grouped (Cursor Kind)
-instance AstNode Grouped where
-  type AstNodeKind Grouped = Kind
-  castNode = Ast.matchNode (== Group) Grouped
-  nodeSyntax (Grouped cursor) = cursor
+instance AstView Grouped where
+  type AstViewKind Grouped = Kind
+  fromCursor = Ast.matchNode (== Group) Grouped
+  toCursor (Grouped cursor) = cursor
+instance AstNode Grouped
 
 wideSource :: Int -> [Text]
 wideSource count = [Text.pack ("名" ++ show index ++ " ") | index <- [1 .. count]]
@@ -234,7 +237,7 @@ checkFixtures = do
         [4 + fromIntegral (length (show index)) | index <- [1 .. count]])
       assert "last offset" (cursorEnd (checked (Cursor.childAt (count - 1) root)) == Green.nodeLength node)
       assert "sibling observation" (siblingSum root == sum (map cursorEnd (Cursor.children root)))
-      assert "typed last token" (cursorEnd (tokenSyntax (selected (Ast.token root :: Maybe Numbered))) == Green.nodeLength node)
+      assert "typed last token" (cursorEnd (toCursor (selected (Ast.token root :: Maybe Numbered))) == Green.nodeLength node)
       assert "splice exact source" (Green.renderNode inserted == Text.concat
         [Text.concat (take (count `div` 2) texts), "NEW", Text.concat (drop (count `div` 2) texts)])
     checkChain count = do

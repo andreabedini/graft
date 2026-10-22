@@ -85,11 +85,12 @@ module Graft
   , Checkpoint
   , BuilderError (..)
     -- * Typed views
-  , AstNode (..)
-  , AstToken (..)
+  , AstView (..)
+  , AstNode
+  , AstToken
   ) where
 
-import Graft.Ast (AstNode (..), AstToken (..))
+import Graft.Ast (AstNode, AstToken, AstView (..))
 import Graft.Build (Build)
 import Graft.Builder (Builder, BuilderError (..), Checkpoint)
 import Graft.Cursor (Cursor, Path, PathError (..), TokenAtOffset (..), WalkEvent (..))

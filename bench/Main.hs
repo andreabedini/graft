@@ -85,11 +85,11 @@ wideBench size = bgroup (show size)
             (size `div` 2) (size `div` 2) [replacement]) node
         , bench "edit-each-child" $ whnf editEach tree
         , bench "edit-parent-once" $ whnf editParent tree
-        , bench "typed-first" $ whnf (maybe 0 (cursorEnd . tokenSyntax) .
+        , bench "typed-first" $ whnf (maybe 0 (cursorEnd . toCursor) .
             (Ast.token :: Cursor Kind -> Maybe Named)) root
-        , bench "typed-last" $ whnf (maybe 0 (cursorEnd . tokenSyntax) .
+        , bench "typed-last" $ whnf (maybe 0 (cursorEnd . toCursor) .
             (Ast.token :: Cursor Kind -> Maybe Numbered)) root
-        , bench "typed-all" $ whnf (List.foldl' (\total view -> total + cursorEnd (tokenSyntax view)) 0 .
+        , bench "typed-all" $ whnf (List.foldl' (\total view -> total + cursorEnd (toCursor view)) 0 .
             (Ast.tokens :: Cursor Kind -> [Named])) root
         ]
   ]
@@ -138,9 +138,9 @@ documentBench = env (pure (Prepared (Node (documentTree 1000)))) $ \prepared ->
     [ bench "construct" $ whnf (cached . documentTree) 1000
     , bench "render" $ nf Green.render tree
     , bench "tokens" $ whnf (List.foldl' (\total cursor -> total + cursorEnd cursor) 0 . Cursor.descendantTokens . Cursor.fromGreen) tree
-    , bench "typed-first-group" $ whnf (maybe 0 (cursorEnd . nodeSyntax) .
+    , bench "typed-first-group" $ whnf (maybe 0 (cursorEnd . toCursor) .
         (Ast.child :: Cursor Kind -> Maybe Grouped)) root
-    , bench "typed-all-groups" $ whnf (List.foldl' (\total view -> total + cursorEnd (nodeSyntax view)) 0 .
+    , bench "typed-all-groups" $ whnf (List.foldl' (\total view -> total + cursorEnd (toCursor view)) 0 .
         (Ast.children :: Cursor Kind -> [Grouped])) root
     , bench "100-edits-latest" $ whnf (Green.length . editMany 100 path) tree
     , bench "100-edits-history" $ whnf (List.foldl' (\total snapshot -> total + Green.length snapshot) 0 .
