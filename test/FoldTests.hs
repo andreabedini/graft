@@ -7,6 +7,7 @@ import Data.Functor.Const (Const (..))
 import Data.Functor.Identity (Identity (..))
 import qualified Data.Text as Text
 import Graft
+import qualified Graft.Cursor as Cursor
 import qualified Graft.Green as Green
 import Test.QuickCheck
 import TestModel
@@ -53,6 +54,40 @@ propFoldIsLazy = once $
     Node top -> Green.fold Green.text (const (Text.concat . take 1)) top === "x"
     Token _ -> counterexample "halfMax is a token" False
 
+-- The fold visits the elements that a cursor lists as descendants, in the
+-- same order, for nodes and for a token on its own.
+propFoldMOrder :: Model -> Property
+propFoldMOrder model =
+  let tree = compile model
+      visited = reverse (runIdentity (Green.foldM (\seen element -> Identity (element : seen)) [] tree))
+  in visited === map Cursor.green (Cursor.descendants (Cursor.fromGreen tree))
+
+-- In Either the fold stops at the first Left, which is the first leaf with a
+-- given kind in source order.
+propFoldMStops :: Model -> Property
+propFoldMStops model =
+  let firstSpace = [text | (Space, text) <- leaves model]
+      step () (Token token) | Green.tokenKind token == Space = Left (observe token)
+      step () _ = Right ()
+  in either (Just . snd) (const Nothing) (Green.foldM step () (compile model))
+       === case firstSpace of { text : _ -> Just text; [] -> Nothing }
+
+-- The accumulator is evaluated before every step, even by a step that
+-- ignores it, so a fold cannot build a chain of thunks. The empty node at the
+-- end gives the fold one more step after every token.
+propFoldMForcesAccumulator :: Model -> Property
+propFoldMForcesAccumulator model =
+  let step :: Int -> GreenElement Kind -> Identity Int
+      step _ (Token _) = Identity (error "forced")
+      step _ (Node _) = Identity 0
+  in not (null (leaves model)) ==>
+       failsWith "forced" (runIdentity (Green.foldM step 0 (compile (Branch Root [model, Branch Group []]))))
+
+propMapIsTraverse :: Model -> Property
+propMapIsTraverse model =
+  let tree = rooted model
+  in Green.map (retext grow) tree === runIdentity (Green.traverse (Identity . retext grow) tree)
+
 propTraverseIdentity :: Model -> Property
 propTraverseIdentity model =
   let tree = rooted model
@@ -83,9 +118,13 @@ propTraverseComposition model =
 
 foldProperties :: [(String, Property)]
 foldProperties =
-  [ ("fold rebuilds the model", property propFoldRebuildsModel)
+  [ ("foldM visits the descendants in preorder", property propFoldMOrder)
+  , ("foldM stops at the first failure", property propFoldMStops)
+  , ("foldM forces the accumulator before each step", property propFoldMForcesAccumulator)
+  , ("fold rebuilds the model", property propFoldRebuildsModel)
   , ("fold with concatenation renders", property propFoldRendering)
   , ("fold visits only the children it needs", propFoldIsLazy)
+  , ("map is traverse with Identity", property propMapIsTraverse)
   , ("traverse with Identity is the identity", property propTraverseIdentity)
   , ("traverse visits tokens in source order", property propTraverseOrder)
   , ("traverse rewrites tokens and measures nodes again", property propTraverseRewrites)

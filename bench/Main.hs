@@ -3,6 +3,7 @@
 module Main (main) where
 
 import Control.DeepSeq (rnf)
+import Data.Functor.Identity (Identity (..))
 import Data.Hashable (hash)
 import qualified Data.List as List
 import qualified Data.Text as Text
@@ -148,6 +149,10 @@ documentBench = env (pure (Prepared (Node (documentTree 1000)))) $ \prepared ->
     , bench "render" $ nf Green.render tree
     , bench "hash" $ whnf hash tree
     , bench "rnf" $ whnf rnf tree
+    , bench "count-foldM" $ whnf (runIdentity . Green.foldM countToken 0) tree
+    , bench "count-fold" $ whnf ((\node -> Green.fold (const 1) (const sum) node :: Int) . nodeOf) tree
+    , bench "map" $ whnf (Green.nodeLength . Green.map copyText . nodeOf) tree
+    , bench "traverse" $ whnf (Green.nodeLength . runIdentity . Green.traverse (Identity . copyText) . nodeOf) tree
     , bench "tokens" $ whnf (List.foldl' (\total cursor -> total + cursorEnd cursor) 0 . Cursor.descendantTokens . Cursor.fromGreen) tree
     , bench "typed-first-group" $ whnf (maybe 0 (cursorEnd . toCursor) .
         (Ast.child :: Cursor Kind -> Maybe Grouped)) root
@@ -167,3 +172,17 @@ offsetEnd offset root = case Cursor.tokenAt offset root of
   NoToken -> error "fixture offset has no token"
   SingleToken cursor -> cursorEnd cursor
   BetweenTokens left right -> cursorEnd left + cursorEnd right
+
+-- Counts the tokens, for comparing folds with cursor walks.
+countToken :: Int -> GreenElement Kind -> Identity Int
+countToken count (Token _) = Identity (count + 1)
+countToken count (Node _) = Identity count
+
+-- Copies a token's text out of its source buffer.
+copyText :: GreenToken Kind -> GreenToken Kind
+copyText token = Green.token (Green.tokenKind token) (Text.copy (Green.text token))
+
+-- The root of a prepared tree, which is always a node.
+nodeOf :: GreenElement Kind -> GreenNode Kind
+nodeOf (Node node) = node
+nodeOf (Token _) = error "a prepared tree is a node"
