@@ -12,6 +12,7 @@ module Fixtures
 
 import Control.DeepSeq (NFData (..))
 import Control.Exception (evaluate)
+import Data.Hashable (Hashable (..))
 import Control.Monad (unless)
 import qualified Data.List as List
 import Data.Text (Text)
@@ -25,7 +26,10 @@ import qualified Graft.Green as Green
 import qualified Graft.Range as Range
 
 data Kind = Root | Group | Name | Number | Trivia
-  deriving (Eq, Show)
+  deriving (Eq, Show, Enum)
+
+instance Hashable Kind where
+  hashWithSalt salt = hashWithSalt salt . fromEnum
 
 instance NFData Kind where
   rnf kind = kind `seq` ()
