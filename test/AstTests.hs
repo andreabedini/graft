@@ -15,28 +15,32 @@ import Test.QuickCheck
 import TestModel
 
 newtype GroupView = GroupView (Cursor Kind)
-instance AstNode GroupView where
-  type AstNodeKind GroupView = Kind
-  castNode = Ast.matchNode (== Group) GroupView
-  nodeSyntax (GroupView cursor) = cursor
+instance AstView GroupView where
+  type AstViewKind GroupView = Kind
+  fromCursor = Ast.matchNode (== Group) GroupView
+  toCursor (GroupView cursor) = cursor
+instance AstNode GroupView
 
 newtype AnyNode = AnyNode (Cursor Kind)
-instance AstNode AnyNode where
-  type AstNodeKind AnyNode = Kind
-  castNode = Ast.matchNode (const True) AnyNode
-  nodeSyntax (AnyNode cursor) = cursor
+instance AstView AnyNode where
+  type AstViewKind AnyNode = Kind
+  fromCursor = Ast.matchNode (const True) AnyNode
+  toCursor (AnyNode cursor) = cursor
+instance AstNode AnyNode
 
 newtype NameView = NameView (Cursor Kind)
-instance AstToken NameView where
-  type AstTokenKind NameView = Kind
-  castToken = Ast.matchToken (== Name) NameView
-  tokenSyntax (NameView cursor) = cursor
+instance AstView NameView where
+  type AstViewKind NameView = Kind
+  fromCursor = Ast.matchToken (== Name) NameView
+  toCursor (NameView cursor) = cursor
+instance AstToken NameView
 
 newtype AnyToken = AnyToken (Cursor Kind)
-instance AstToken AnyToken where
-  type AstTokenKind AnyToken = Kind
-  castToken = Ast.matchToken (const True) AnyToken
-  tokenSyntax (AnyToken cursor) = cursor
+instance AstView AnyToken where
+  type AstViewKind AnyToken = Kind
+  fromCursor = Ast.matchToken (const True) AnyToken
+  toCursor (AnyToken cursor) = cursor
+instance AstToken AnyToken
 
 type Observation = (Path, TextRange, GreenElement Kind, GreenElement Kind)
 
@@ -61,16 +65,16 @@ propCasting model = conjoin
             node = case selected of Branch _ _ -> Just expected; _ -> Nothing
             token = case selected of Leaf _ _ -> Just expected; _ -> Nothing
         in conjoin
-          [ fmap (observe . nodeSyntax) (castNode cursor :: Maybe GroupView) === group
-          , fmap (observe . tokenSyntax) (castToken cursor :: Maybe NameView) === name
-          , fmap (observe . nodeSyntax) (castNode cursor :: Maybe AnyNode) === node
-          , fmap (observe . tokenSyntax) (castToken cursor :: Maybe AnyToken) === token
-          , case castNode cursor :: Maybe GroupView of
+          [ fmap (observe . toCursor) (fromCursor cursor :: Maybe GroupView) === group
+          , fmap (observe . toCursor) (fromCursor cursor :: Maybe NameView) === name
+          , fmap (observe . toCursor) (fromCursor cursor :: Maybe AnyNode) === node
+          , fmap (observe . toCursor) (fromCursor cursor :: Maybe AnyToken) === token
+          , case fromCursor cursor :: Maybe GroupView of
               Nothing -> property True
-              Just view -> fmap (observe . nodeSyntax) (castNode (nodeSyntax view) :: Maybe GroupView) === group
-          , case castToken cursor :: Maybe NameView of
+              Just view -> fmap (observe . toCursor) (fromCursor (toCursor view) :: Maybe GroupView) === group
+          , case fromCursor cursor :: Maybe NameView of
               Nothing -> property True
-              Just view -> fmap (observe . tokenSyntax) (castToken (tokenSyntax view) :: Maybe NameView) === name
+              Just view -> fmap (observe . toCursor) (fromCursor (toCursor view) :: Maybe NameView) === name
           ]
   | (path, _, selected, _) <- contexts model
   ]
@@ -86,12 +90,12 @@ propFields model = conjoin
             leaves = [oracle model (path ++ [index]) | (index, Leaf _ _) <- zip [0 ..] items]
             names = [oracle model (path ++ [index]) | (index, Leaf Name _) <- zip [0 ..] items]
         in conjoin
-          [ map (observe . nodeSyntax) (Ast.children cursor :: [AnyNode]) === nodes
-          , map (observe . nodeSyntax) (Ast.children cursor :: [GroupView]) === groups
-          , fmap (observe . nodeSyntax) (Ast.child cursor :: Maybe GroupView) === listToMaybe groups
-          , map (observe . tokenSyntax) (Ast.tokens cursor :: [AnyToken]) === leaves
-          , map (observe . tokenSyntax) (Ast.tokens cursor :: [NameView]) === names
-          , fmap (observe . tokenSyntax) (Ast.token cursor :: Maybe NameView) === listToMaybe names
+          [ map (observe . toCursor) (Ast.children cursor :: [AnyNode]) === nodes
+          , map (observe . toCursor) (Ast.children cursor :: [GroupView]) === groups
+          , fmap (observe . toCursor) (Ast.child cursor :: Maybe GroupView) === listToMaybe groups
+          , map (observe . toCursor) (Ast.tokens cursor :: [AnyToken]) === leaves
+          , map (observe . toCursor) (Ast.tokens cursor :: [NameView]) === names
+          , fmap (observe . toCursor) (Ast.token cursor :: Maybe NameView) === listToMaybe names
           ]
   | (path, _, selected, _) <- contexts model
   ]
@@ -109,10 +113,10 @@ propParents model = conjoin
               Just p | p `elem` map (\(candidate, _, _, _) -> candidate) groups -> Just (oracle model p)
               _ -> Nothing
         in conjoin
-          [ fmap (observe . nodeSyntax) (Ast.parent cursor :: Maybe AnyNode) === fmap (oracle model) immediate
-          , fmap (observe . nodeSyntax) (Ast.parent cursor :: Maybe GroupView) === parentGroup
-          , map (observe . nodeSyntax) (Ast.ancestors cursor :: [AnyNode]) === map (oracle model) above
-          , map (observe . nodeSyntax) (Ast.ancestors cursor :: [GroupView]) === groups
+          [ fmap (observe . toCursor) (Ast.parent cursor :: Maybe AnyNode) === fmap (oracle model) immediate
+          , fmap (observe . toCursor) (Ast.parent cursor :: Maybe GroupView) === parentGroup
+          , map (observe . toCursor) (Ast.ancestors cursor :: [AnyNode]) === map (oracle model) above
+          , map (observe . toCursor) (Ast.ancestors cursor :: [GroupView]) === groups
           ]
   | (path, _, _, _) <- contexts model
   ]
@@ -141,15 +145,15 @@ propTokenEdit subtree = forAll genText $ \newText ->
   in forAll (elements [context | context@(_, _, Leaf Name _, _) <- contexts model]) $
     \(path, prefix, selected, suffix) -> case Cursor.at path (Cursor.fromGreen root) of
       Left err -> counterexample (show err) False
-      Right cursor -> case castToken cursor :: Maybe NameView of
+      Right cursor -> case fromCursor cursor :: Maybe NameView of
         Nothing -> counterexample "name view failed" False
         Just view ->
-          let edited = Cursor.tree (Cursor.replace (compile (Leaf Name newText)) (tokenSyntax view))
+          let edited = Cursor.tree (Cursor.replace (compile (Leaf Name newText)) (toCursor view))
           in conjoin
             [ matches (modelReplace path (Leaf Name newText) model) edited
             , Text.unpack (Green.render edited) === prefix ++ newText ++ suffix
-            , observe (tokenSyntax view) === oracle model path
-            , Text.unpack (Green.render (Cursor.green (tokenSyntax view))) === source selected
+            , observe (toCursor view) === oracle model path
+            , Text.unpack (Green.render (Cursor.green (toCursor view))) === source selected
             ]
 
 propNodeEdit :: Model -> Model -> Property
@@ -160,47 +164,49 @@ propNodeEdit subtree replacement =
     \(path, kind, items) -> forAll (chooseInt (0, length items)) $ \index ->
       case Cursor.at path (Cursor.fromGreen root) of
         Left err -> counterexample (show err) False
-        Right cursor -> case castNode cursor :: Maybe AnyNode of
+        Right cursor -> case fromCursor cursor :: Maybe AnyNode of
           Nothing -> counterexample "node view failed" False
-          Just view -> case Cursor.tree <$> Cursor.insertChild index (compile replacement) (nodeSyntax view) of
+          Just view -> case Cursor.tree <$> Cursor.insertChild index (compile replacement) (toCursor view) of
             Left err -> counterexample (show err) False
             Right edited -> conjoin
               [ matches (modelReplace path (Branch kind (take index items ++ [replacement] ++ drop index items)) model) edited
-              , observe (nodeSyntax view) === oracle model path
+              , observe (toCursor view) === oracle model path
               ]
 
 -- These predicates fail if first-match queries force a later cast.
 newtype StopNode = StopNode (Cursor Kind)
-instance AstNode StopNode where
-  type AstNodeKind StopNode = Kind
-  castNode = Ast.matchNode (\kind -> if kind == Comment then error "later node cast forced" else kind == Group) StopNode
-  nodeSyntax (StopNode cursor) = cursor
+instance AstView StopNode where
+  type AstViewKind StopNode = Kind
+  fromCursor = Ast.matchNode (\kind -> if kind == Comment then error "later node cast forced" else kind == Group) StopNode
+  toCursor (StopNode cursor) = cursor
+instance AstNode StopNode
 
 newtype StopToken = StopToken (Cursor Kind)
-instance AstToken StopToken where
-  type AstTokenKind StopToken = Kind
-  castToken = Ast.matchToken (\kind -> if kind == Space then error "later token cast forced" else kind == Name) StopToken
-  tokenSyntax (StopToken cursor) = cursor
+instance AstView StopToken where
+  type AstViewKind StopToken = Kind
+  fromCursor = Ast.matchToken (\kind -> if kind == Space then error "later token cast forced" else kind == Name) StopToken
+  toCursor (StopToken cursor) = cursor
+instance AstToken StopToken
 
 regressions :: Property
 regressions = once $ conjoin
-  [ fmap (Cursor.path . nodeSyntax) (castNode emptyGroup :: Maybe GroupView) === Just []
-  , fmap (Cursor.path . tokenSyntax) (Ast.token emptyGroup :: Maybe NameView) === Nothing
-  , fmap (Cursor.path . tokenSyntax) (castToken (Cursor.fromGreen (tok "")) :: Maybe NameView) === Just []
-  , fmap (Cursor.path . tokenSyntax) (castToken (Cursor.fromGreen (Node (Green.node Name []))) :: Maybe NameView) === Nothing
-  , fmap (Cursor.path . nodeSyntax) (castNode (Cursor.fromGreen (Token (Green.token Group "bad"))) :: Maybe GroupView) === Nothing
-  , map (Cursor.path . nodeSyntax) (Ast.children sharedRoot :: [GroupView]) === [[0], [1]]
-  , map (Cursor.range . nodeSyntax) (Ast.children sharedRoot :: [GroupView])
+  [ fmap (Cursor.path . toCursor) (fromCursor emptyGroup :: Maybe GroupView) === Just []
+  , fmap (Cursor.path . toCursor) (Ast.token emptyGroup :: Maybe NameView) === Nothing
+  , fmap (Cursor.path . toCursor) (fromCursor (Cursor.fromGreen (tok "")) :: Maybe NameView) === Just []
+  , fmap (Cursor.path . toCursor) (fromCursor (Cursor.fromGreen (Node (Green.node Name []))) :: Maybe NameView) === Nothing
+  , fmap (Cursor.path . toCursor) (fromCursor (Cursor.fromGreen (Token (Green.token Group "bad"))) :: Maybe GroupView) === Nothing
+  , map (Cursor.path . toCursor) (Ast.children sharedRoot :: [GroupView]) === [[0], [1]]
+  , map (Cursor.range . toCursor) (Ast.children sharedRoot :: [GroupView])
       === [Range.fromLength 0 2, Range.fromLength 2 2]
-  , fmap (Cursor.path . tokenSyntax) (Ast.token sharedRoot :: Maybe NameView) === Nothing
-  , map (Cursor.path . tokenSyntax) (Ast.tokens (Cursor.fromGreen (tok "x")) :: [NameView]) === []
-  , fmap (Cursor.path . nodeSyntax) (Ast.child lazyRoot :: Maybe StopNode) === Just [0]
-  , fmap (Cursor.path . tokenSyntax) (Ast.token lazyRoot :: Maybe StopToken) === Just [2]
+  , fmap (Cursor.path . toCursor) (Ast.token sharedRoot :: Maybe NameView) === Nothing
+  , map (Cursor.path . toCursor) (Ast.tokens (Cursor.fromGreen (tok "x")) :: [NameView]) === []
+  , fmap (Cursor.path . toCursor) (Ast.child lazyRoot :: Maybe StopNode) === Just [0]
+  , fmap (Cursor.path . toCursor) (Ast.token lazyRoot :: Maybe StopToken) === Just [2]
   , Ast.matchNode (error "token must not check node predicate") (const ()) (Cursor.fromGreen (tok "x")) === Nothing
   , Ast.matchToken (error "node must not check token predicate") (const ()) emptyGroup === Nothing
-  , fmap (Cursor.range . nodeSyntax) (castNode hugeRoot :: Maybe GroupView)
+  , fmap (Cursor.range . toCursor) (fromCursor hugeRoot :: Maybe GroupView)
       === Just (Range.fromLength 0 (2 ^ hugeDepth))
-  , fmap (Cursor.range . nodeSyntax) (Ast.child hugeRoot :: Maybe GroupView)
+  , fmap (Cursor.range . toCursor) (Ast.child hugeRoot :: Maybe GroupView)
       === Just (Range.fromLength 0 (2 ^ (hugeDepth - 1)))
   ]
   where

@@ -7,6 +7,12 @@
 -- typed access to fields, and every view keeps its exact text, range and
 -- context, so there is no separate AST to keep in sync with the source.
 --
+-- The classes follow the shape of @Exception@ in "Control.Exception", with
+-- 'Cursor' in the place of @SomeException@: 'fromCursor'
+-- is a cast that can fail, and 'toCursor' gives back the cursor. 'AstView'
+-- holds the cast, and the empty classes 'AstNode' and 'AstToken' say
+-- whether the view is of nodes or of tokens.
+--
 -- This module is meant to be imported qualified; its classes are also
 -- exported by "Graft", so instances can be written without qualification:
 --
@@ -15,29 +21,34 @@
 -- >
 -- > newtype Call = Call (Cursor Kind)
 -- >
--- > instance AstNode Call where
--- >   type AstNodeKind Call = Kind
--- >   castNode = Ast.matchNode (== CallKind) Call
--- >   nodeSyntax (Call cursor) = cursor
+-- > instance AstView Call where
+-- >   type AstViewKind Call = Kind
+-- >   fromCursor = Ast.matchNode (== CallKind) Call
+-- >   toCursor (Call cursor) = cursor
+-- >
+-- > instance AstNode Call
 -- >
 -- > newtype Name = Name (Cursor Kind)
 -- >
--- > instance AstToken Name where
--- >   type AstTokenKind Name = Kind
--- >   castToken = Ast.matchToken (== NameKind) Name
--- >   tokenSyntax (Name cursor) = cursor
+-- > instance AstView Name where
+-- >   type AstViewKind Name = Kind
+-- >   fromCursor = Ast.matchToken (== NameKind) Name
+-- >   toCursor (Name cursor) = cursor
+-- >
+-- > instance AstToken Name
 -- >
 -- > -- The function being called, if the call has one.
 -- > callee :: Call -> Maybe Name
--- > callee = Ast.token . nodeSyntax
+-- > callee = Ast.token . toCursor
 --
 -- A cast checks only the kind, not the grammar, so a call with a missing
 -- callee still casts and @callee@ returns 'Nothing'. Keep the view
 -- constructors private so that views are only made by casting.
 module Graft.Ast
   ( -- * Views
-    AstNode (..)
-  , AstToken (..)
+    AstView (..)
+  , AstNode
+  , AstToken
   , matchNode
   , matchToken
     -- * Fields
@@ -54,81 +65,83 @@ import Graft.Cursor (Cursor)
 import qualified Graft.Cursor as Cursor
 import Graft.Green.Internal (GreenElement (..), GreenNode (..), GreenToken (..))
 
--- | A typed view of a node, usually a newtype around a 'Cursor'.
+-- | A typed view of a node or a token, usually a newtype around a 'Cursor'.
+-- Declare an 'AstNode' or 'AstToken' instance too, to say which it is.
 --
--- Instances should satisfy these laws, which 'matchNode' does:
+-- Instances should satisfy these laws, which 'matchNode' and 'matchToken'
+-- do:
 --
--- * 'castNode' rejects token cursors.
--- * Whether 'castNode' succeeds depends only on the focused element,
+-- * Whether 'fromCursor' succeeds depends only on the focused element,
 --   'Cursor.green', not on where it is: two cursors on equal elements are
 --   both accepted or both rejected.
--- * If @castNode cursor@ is @Just view@, then @nodeSyntax view@ is that
+-- * If @fromCursor cursor@ is @Just view@, then @toCursor view@ is that
 --   cursor, unchanged, with the same path, range and element.
--- * Casting @nodeSyntax view@ succeeds again.
-class AstNode ast where
+-- * Casting @toCursor view@ succeeds again.
+class AstView view where
   -- | The kind type of the trees this view applies to.
-  type AstNodeKind ast
-  -- | View a node, or 'Nothing' if it isn't one of this view's kinds.
-  castNode :: Cursor (AstNodeKind ast) -> Maybe ast
+  type AstViewKind view
+  -- | View an element, or 'Nothing' if it isn't one of this view's kinds.
+  fromCursor :: Cursor (AstViewKind view) -> Maybe view
   -- | The cursor the view was made from.
-  nodeSyntax :: ast -> Cursor (AstNodeKind ast)
+  toCursor :: view -> Cursor (AstViewKind view)
 
--- | A typed view of a token, with the same laws as 'AstNode' except that
--- 'castToken' rejects node cursors. Interpreting the token's text, for
--- example reading a number, is up to the application.
-class AstToken ast where
-  -- | The kind type of the trees this view applies to.
-  type AstTokenKind ast
-  -- | View a token, or 'Nothing' if it isn't one of this view's kinds.
-  castToken :: Cursor (AstTokenKind ast) -> Maybe ast
-  -- | The cursor the view was made from.
-  tokenSyntax :: ast -> Cursor (AstTokenKind ast)
+-- | A view of nodes. In addition to the 'AstView' laws, 'fromCursor' must
+-- reject token cursors; 'matchNode' does. 'child', 'children', 'parent' and
+-- 'ancestors' look for these views.
+class AstView view => AstNode view
 
--- | @matchNode accepts wrap@ is a 'castNode' that wraps any node whose kind
--- satisfies @accepts@, as in @castNode = Ast.matchNode (== CallKind) Call@. It
+-- | A view of tokens. In addition to the 'AstView' laws, 'fromCursor' must
+-- reject node cursors; 'matchToken' does. 'token' and 'tokens' look for these
+-- views. Interpreting the token's text, for example reading a number, is up to
+-- the application.
+class AstView view => AstToken view
+
+-- | @matchNode accepts wrap@ is a 'fromCursor' for an 'AstNode' view. It wraps
+-- any node whose kind satisfies @accepts@, as in
+-- @fromCursor = Ast.matchNode (== CallKind) Call@, and rejects tokens. It
 -- doesn't look at the node's children.
-matchNode :: (kind -> Bool) -> (Cursor kind -> ast) -> Cursor kind -> Maybe ast
+matchNode :: (kind -> Bool) -> (Cursor kind -> view) -> Cursor kind -> Maybe view
 matchNode accepts wrap cursor = case Cursor.green cursor of
   Node (GreenNode nodeKind _ _ _) | accepts nodeKind -> Just (wrap cursor)
   _ -> Nothing
 
--- | The 'castToken' counterpart of 'matchNode'. It checks only the kind, not
--- the text.
-matchToken :: (kind -> Bool) -> (Cursor kind -> ast) -> Cursor kind -> Maybe ast
+-- | The 'AstToken' counterpart of 'matchNode'. It rejects nodes and checks
+-- only the kind, not the text.
+matchToken :: (kind -> Bool) -> (Cursor kind -> view) -> Cursor kind -> Maybe view
 matchToken accepts wrap cursor = case Cursor.green cursor of
   Token (GreenToken tokenKind _ _) | accepts tokenKind -> Just (wrap cursor)
   _ -> Nothing
 
 -- | The first child node that casts to the view, or 'Nothing'. Only direct
 -- children are searched.
-child :: AstNode ast => Cursor (AstNodeKind ast) -> Maybe ast
+child :: AstNode view => Cursor (AstViewKind view) -> Maybe view
 child = listToMaybe . children
 
 -- | Every child node that casts to the view, in source order. The list is
 -- lazy.
-children :: AstNode ast => Cursor (AstNodeKind ast) -> [ast]
-children = mapMaybe castNode . filter isNode . Cursor.children
+children :: AstNode view => Cursor (AstViewKind view) -> [view]
+children = mapMaybe fromCursor . filter isNode . Cursor.children
 
 -- | The parent, if it casts to the view. Ancestors further up are not
 -- searched; use 'ancestors' for that.
-parent :: AstNode ast => Cursor (AstNodeKind ast) -> Maybe ast
-parent cursor = Cursor.parent cursor >>= castNode
+parent :: AstNode view => Cursor (AstViewKind view) -> Maybe view
+parent cursor = Cursor.parent cursor >>= fromCursor
 
 -- | Every ancestor that casts to the view, nearest first, not including the
 -- cursor itself. The list is lazy.
-ancestors :: AstNode ast => Cursor (AstNodeKind ast) -> [ast]
-ancestors = mapMaybe castNode . Cursor.ancestors
+ancestors :: AstNode view => Cursor (AstViewKind view) -> [view]
+ancestors = mapMaybe fromCursor . Cursor.ancestors
 
 -- | The first child token that casts to the view, or 'Nothing'. Tokens inside
 -- child nodes are not searched.
-token :: AstToken ast => Cursor (AstTokenKind ast) -> Maybe ast
+token :: AstToken view => Cursor (AstViewKind view) -> Maybe view
 token = listToMaybe . tokens
 
 -- | Every child token that casts to the view, in source order. Tokens inside
 -- child nodes are not included; 'Cursor.descendantTokens' finds those. The
 -- list is lazy.
-tokens :: AstToken ast => Cursor (AstTokenKind ast) -> [ast]
-tokens = mapMaybe castToken . filter (not . isNode) . Cursor.children
+tokens :: AstToken view => Cursor (AstViewKind view) -> [view]
+tokens = mapMaybe fromCursor . filter (not . isNode) . Cursor.children
 
 isNode :: Cursor kind -> Bool
 isNode cursor = case Cursor.green cursor of

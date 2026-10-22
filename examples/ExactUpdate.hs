@@ -17,29 +17,31 @@ data Kind = Root | Expr | Name | Number | Trivia deriving (Eq, Show)
 
 -- Constructors stay private so application code obtains views by casting.
 newtype Expression = Expression (Cursor Kind)
-instance AstNode Expression where
-  type AstNodeKind Expression = Kind
-  castNode = Ast.matchNode (== Expr) Expression
-  nodeSyntax (Expression cursor) = cursor
+instance AstView Expression where
+  type AstViewKind Expression = Kind
+  fromCursor = Ast.matchNode (== Expr) Expression
+  toCursor (Expression cursor) = cursor
+instance AstNode Expression
 
 newtype NumberLiteral = NumberLiteral (Cursor Kind)
-instance AstToken NumberLiteral where
-  type AstTokenKind NumberLiteral = Kind
-  castToken = Ast.matchToken (== Number) NumberLiteral
-  tokenSyntax (NumberLiteral cursor) = cursor
+instance AstView NumberLiteral where
+  type AstViewKind NumberLiteral = Kind
+  fromCursor = Ast.matchToken (== Number) NumberLiteral
+  toCursor (NumberLiteral cursor) = cursor
+instance AstToken NumberLiteral
 
 expressionNumber :: Expression -> Maybe NumberLiteral
-expressionNumber = Ast.token . nodeSyntax
+expressionNumber = Ast.token . toCursor
 
 -- Reading the semantic value and choosing new spelling are application policy.
 -- A valid token kind alone does not guarantee valid numeric text.
 numberValue :: NumberLiteral -> Maybe Integer
-numberValue = readMaybe . Text.unpack . Green.render . Cursor.green . tokenSyntax
+numberValue = readMaybe . Text.unpack . Green.render . Cursor.green . toCursor
 
 setNumberValue :: Integer -> NumberLiteral -> Maybe (GreenElement Kind)
 setNumberValue value literal = do
   oldValue <- numberValue literal
-  let focus = tokenSyntax literal
+  let focus = toCursor literal
   pure $ if oldValue == value
     then Cursor.tree focus -- Retain spelling such as 001.
     else Cursor.tree (Cursor.replace (Token (Green.token Number (Text.pack (show value)))) focus)
