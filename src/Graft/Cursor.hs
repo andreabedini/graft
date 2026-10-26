@@ -37,6 +37,7 @@ module Graft.Cursor
   , fromGreen
   , green
   , kind
+  , isToken
   , range
   , text
   , path
@@ -110,8 +111,8 @@ instance NFData PathError where
   rnf err = err `seq` ()
 
 -- | A position in a tree: a focused node or token and the path back to the
--- root. Nodes and tokens share the cursor type; match on 'green' to tell them
--- apart. There is no 'Eq' instance, because two equal subtrees in different
+-- root. Nodes and tokens share the cursor type; 'isToken' tells them apart.
+-- There is no 'Eq' instance, because two equal subtrees in different
 -- places are different occurrences; compare 'path's instead.
 --
 -- A cursor holds its ancestors, so moving up costs nothing until an edit has
@@ -179,6 +180,14 @@ kind :: Cursor kind -> kind
 kind cursor = case focusChildren cursor of
   Pending node _ -> Green.nodeKind node
   Built -> Green.kind (focusElement cursor)
+
+-- | Whether the focus is a token rather than a node, without building it.
+isToken :: Cursor kind -> Bool
+isToken cursor = case focusChildren cursor of
+  Pending _ _ -> False
+  Built -> case focusElement cursor of
+    Token _ -> True
+    Node _ -> False
 
 -- | The byte range of the focus in the whole tree, without building it.
 range :: Cursor kind -> TextRange
@@ -357,22 +366,18 @@ walk cursor = go cursor []
 -- itself. The typed @Ast.tokens@ gives child tokens only.
 descendantTokens :: Cursor kind -> [Cursor kind]
 descendantTokens = filter isToken . descendants
-  where
-    isToken cursor = case green cursor of
-      Token _ -> True
-      Node _ -> False
 
 -- | The first token at or below the focus. A token is its own first token.
 firstToken :: Cursor kind -> Maybe (Cursor kind)
-firstToken cursor = case green cursor of
-  Token _ -> Just cursor
-  Node _ -> firstChild cursor >>= seek firstToken nextSibling
+firstToken cursor
+  | isToken cursor = Just cursor
+  | otherwise = firstChild cursor >>= seek firstToken nextSibling
 
 -- | The last token at or below the focus.
 lastToken :: Cursor kind -> Maybe (Cursor kind)
-lastToken cursor = case green cursor of
-  Token _ -> Just cursor
-  Node _ -> lastChild cursor >>= seek lastToken previousSibling
+lastToken cursor
+  | isToken cursor = Just cursor
+  | otherwise = lastChild cursor >>= seek lastToken previousSibling
 
 -- | The first token after the focus and everything below it, anywhere in the
 -- tree.
@@ -454,7 +459,8 @@ covering query cursor
 -- An edited node is built when its 'green' element is first read, as
 -- 'text', 'modify', 'tokenAt', 'covering' and the child edits do: its child
 -- array is copied once, with all its replacements, and every cursor on that
--- version of the node shares the result. 'tree' builds the nodes from the
+-- version of the node shares the result. 'kind', 'isToken', 'range' and the
+-- casts in "Graft.Ast" don't build it. 'tree' builds the nodes from the
 -- edits to the root in one pass. A walk that edits many tokens and then takes
 -- the 'tree' copies each edited node once.
 --

@@ -54,15 +54,19 @@ modelChildren :: Model -> [Model]
 modelChildren (Branch _ items) = items
 modelChildren (Leaf _ _) = []
 
+isLeaf :: Model -> Bool
+isLeaf (Leaf _ _) = True
+isLeaf (Branch _ _) = False
+
 -- The path, range and kind of an occurrence, from the model's own text.
-expected :: Model -> Path -> (Path, TextRange, Kind)
+expected :: Model -> Path -> (Path, TextRange, Kind, Bool)
 expected model path = case [(prefix, selected) | (other, prefix, selected, _) <- contexts model, other == path] of
   (prefix, selected) : _ ->
-    (path, Range.fromLength (byteLength prefix) (byteLength (source selected)), modelKind selected)
+    (path, Range.fromLength (byteLength prefix) (byteLength (source selected)), modelKind selected, isLeaf selected)
   [] -> error ("no occurrence at " ++ show path)
 
-observe :: Cursor Kind -> (Path, TextRange, Kind)
-observe cursor = (Cursor.path cursor, Cursor.range cursor, Cursor.kind cursor)
+observe :: Cursor Kind -> (Path, TextRange, Kind, Bool)
+observe cursor = (Cursor.path cursor, Cursor.range cursor, Cursor.kind cursor, Cursor.isToken cursor)
 
 -- Where a step leads in the model, or Nothing where the cursor has nowhere
 -- to go.
