@@ -20,9 +20,9 @@ The same short name can appear in several modules, such as `children` in
 type. The `Graft` module exports only the types and classes, so that they can
 be used unqualified alongside the qualified functions.
 
-Edits inside a tree go through a cursor. `Graft.Green` edits only the
-children of a single node, and `Graft.Cursor` rebuilds the ancestors; there is
-no separate set of edits addressed by path.
+Edits inside a tree go through a cursor: `Graft.Green` edits the children of a
+single node, and `Graft.Cursor` carries the edit up through the ancestors. To
+edit at a path, move there with `Cursor.at` and edit the cursor.
 
 ## Green trees
 
@@ -49,6 +49,17 @@ the cached length. Graft never inserts separators or normalizes text: every
 byte of output came from some token. Valid Unicode round-trips exactly; invalid
 UTF-8 is outside the contract.
 
+`Green.foldM` is a strict left fold over a tree's elements in preorder, in any
+monad. It loops over each node's child array by index, builds no list, and
+folds a node's last child by a tail call, so a chain of single-child nodes
+runs in constant stack. Rendering, `rnf` and hashing are written with it. It
+has no event for leaving a node, because that would lose the tail call: an
+earlier version with enter and leave events rendered the 10,000-level chain
+2.4 times slower. `Cursor.walk` reports leaving, at the cost of a cursor per
+element. `Green.fold` is the lazy bottom-up fold, for results shaped like the
+tree; `Green.map` and `Green.traverse` rebuild a tree from new tokens and
+measure every node again.
+
 Trivia is ordinary tokens. Rowan attaches leading and trailing trivia to tokens;
 Graft doesn't, so that there is one kind of leaf and no rule about which token
 owns a comment. Applications that want ownership can express it with node
@@ -67,16 +78,17 @@ a parent node without re-allocating it.
 | Operation | Cost |
 | --- | --- |
 | Length of a node or token | Constant |
-| Child by index, first or last child, sibling | Constant |
+| Child by index, first or last child, sibling | Constant; below a node with replaced children, a child by index is linear in the number replaced before it |
 | Token or element at an offset | Logarithmic in the width of each level, times depth |
 | Building a node | Linear in its number of children |
 | Replacing a child | Linear in the parent's width: the array is copied, and the length is adjusted by the difference |
 | Moving up or sideways from an edited element, the first time | Logarithmic in the number of the parent's replaced children: the edit is recorded, not copied |
-| Reading an edited node, or the edited tree | Linear in the width of each edited node, once per version |
+| Reading an edited node | Linear in its width, once per version of the node |
+| `Cursor.tree` after edits | Linear in the width of each edited node up to the root, on every call |
 | Splicing children | Linear in the parent's width plus the replacements |
 | Rendering | Linear in the output |
 
-No operation traverses descendants it doesn't change. Equality is structural
+No edit traverses descendants it doesn't change. Equality is structural
 but returns immediately for physically identical nodes, so comparing two
 versions that share most of their structure is cheap when the shared parts are
 the same values.
@@ -90,25 +102,34 @@ question that needs measurements from real parsers.
 
 A cursor is a zipper. It holds the focused element, its absolute offset and
 length, its index in the parent, and the parent's cursor, and so on up to the
-root. Moving down, up or sideways is constant time, and the cursor computes
-absolute ranges from the cached child offsets.
+root. Moving down, up or sideways is constant time, apart from the edits
+described below, and the cursor computes absolute ranges from the cached child
+offsets.
 
-`Cursor.replace` doesn't copy anything. It returns a cursor with the new
-focus whose parent is a thunk: the parent as it was, with the new focus added
-to a map of its replaced children. The first move up or sideways forces it,
-and the result is the parent that every later cursor moving through it
-shares, so a walk that edits many tokens, and reads the ancestors of each,
-records each edit in each ancestor once. A parent with replaced children
-reads its children from the original node and the map, so moving among them
-copies nothing. Its own node is built, with one copy of the child array and
-all the replacements, the first time something reads it, and `Cursor.tree`
-builds the nodes from the edits to the root in one pass. Renaming every token
-in a list of n tokens through one cursor therefore takes time proportional to
-n, as editing the list node once with `Cursor.modify` does.
+`Cursor.replace` copies nothing. It returns a cursor on the new focus whose
+parent is a thunk: the old parent, with the new focus added to a map of its
+replaced children. The first move up or sideways forces the thunk, recording
+the edit in time logarithmic in the size of the map, and leaves the
+grandparent as a thunk of the same kind. Every cursor that later passes
+through that parent shares the result, so a walk that edits many tokens, and
+reads the ancestors of each, records each edit in each ancestor once.
+
+An edited node is built only when something reads its green element. Until
+then it serves its children from the original node and the map, so moving
+among them copies nothing. `Cursor.green`, `Cursor.text`, `Cursor.modify`,
+`Cursor.tokenAt`, `Cursor.covering` and the child edits read the element and
+build the node, with one copy of its child array, and every cursor on that
+version of the node shares it. `Cursor.kind`, `Cursor.isToken`,
+`Cursor.range` and the casts in `Graft.Ast` don't, so a walk that inspects its
+ancestors without reading their elements stays linear. `Cursor.tree` builds
+the nodes from the edits up to the root in one pass, and again on each call.
+Renaming every token of an n-token list through one cursor and then taking
+the tree therefore takes time roughly proportional to n, as editing the list
+node once with `Cursor.modify` does.
 
 The cost is memory: until a cursor on an edited version is dropped, it keeps
-the version of each edited node from before the edits, and the replaced
-elements with it.
+each edited node as it was before the edits, and the replaced elements with
+it.
 
 Edits are persistent. The cursor you started with still sees the original tree,
 and so does every cursor derived from it before the edit. Paths and byte ranges
@@ -118,8 +139,8 @@ versions: Graft can't tell you where an element of the old tree went in the new
 one.
 
 Rowan has separate node and token cursors, and offers mutable red trees
-(`clone_for_update`) so that edits are visible through every handle. Graft has one cursor type for both and
-no mutation; returning a cursor from each edit gives the same ability to keep
+(`clone_for_update`) so that edits are visible through every handle. Graft
+has one cursor type for both and no mutation; returning a cursor from each edit gives the same ability to keep
 working after an edit, without shared mutable state. Rowan's `ancestors`
 starts with the node itself; Graft's `Cursor.ancestors` and `Ast.ancestors`
 start with the parent, while `Cursor.descendants` starts with the focus.
@@ -159,10 +180,11 @@ Rowan's builder asserts on misuse. Graft's pure builder returns
 `Either BuilderError` from every operation that can fail, and `Builder.finish`
 checks that every node was closed and that exactly one root node remains. The
 `Build` monad in `Graft.Build` threads the builder and the errors, and its
-`Build.node` and `Build.nodeAt` bracket a node, so a parser that opens nodes
-only through them can't leave one open.
-`Build.save` and `Build.restore` give backtracking parsers the persistence of
-the pure builder.
+`Build.node` and `Build.nodeAt` bracket a node, so a parser that opens and
+closes nodes only through them can't leave one open. `Build.save` and
+`Build.restore` give backtracking parsers the persistence of the pure builder;
+restoring inside a bracketed body can unbalance it, so restore at the level
+where you saved.
 
 ## Typed views
 

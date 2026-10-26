@@ -2,7 +2,7 @@
 {-# LANGUAGE TypeFamilies #-}
 
 -- Run with: cabal run graft-example
--- The tree is supplied by an application, without a lexer or parser in Graft.
+-- The tree is written out by hand; Graft has no lexer or parser.
 module Main (main) where
 
 import qualified Data.Text as Text
@@ -15,7 +15,8 @@ import Text.Read (readMaybe)
 
 data Kind = Root | Expr | Name | Number | Trivia deriving (Eq, Show)
 
--- Constructors stay private so application code obtains views by casting.
+-- In a library, export the view types but not their constructors, so that
+-- views are made only by casting.
 newtype Expression = Expression (Cursor Kind)
 instance AstView Expression where
   type AstViewKind Expression = Kind
@@ -33,8 +34,9 @@ instance AstToken NumberLiteral
 expressionNumber :: Expression -> Maybe NumberLiteral
 expressionNumber = Ast.token . toCursor
 
--- Reading the semantic value and choosing new spelling are application policy.
--- A valid token kind alone does not guarantee valid numeric text.
+-- Graft doesn't interpret token text: reading the value and choosing a new
+-- spelling are up to the application. A Number token can still hold text
+-- that doesn't parse as a number.
 numberValue :: NumberLiteral -> Maybe Integer
 numberValue = readMaybe . Text.unpack . Green.render . Cursor.green . toCursor
 
@@ -43,7 +45,7 @@ setNumberValue value literal = do
   oldValue <- numberValue literal
   let focus = toCursor literal
   pure $ if oldValue == value
-    then Cursor.tree focus -- Retain spelling such as 001.
+    then Cursor.tree focus -- Same value: keep the spelling, such as 001.
     else Cursor.tree (Cursor.replace (Token (Green.token Number (Text.pack (show value)))) focus)
 
 updateValue :: Integer -> GreenElement Kind -> Maybe (GreenElement Kind)

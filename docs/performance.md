@@ -1,11 +1,15 @@
 # Graft performance
 
-This report records Graft's benchmark results and compares them with the first
-baseline. The [run guide](../bench/README.md) explains how to reproduce them.
+A dated log of Graft's benchmark measurements, oldest first. The first three
+entries are full runs of `bench/run.py`, whose raw results are kept under
+`bench/results/`; the [run guide](../bench/README.md) explains how to
+reproduce them. Later entries are before-and-after passes of the cases that a
+change affected. The last section says what the numbers suggest about the
+remaining costs.
 
 ## Method
 
-The benchmark suite ([source](../bench/Main.hs)) runs these workloads:
+The full runs measured these workloads ([source](../bench/Main.hs)):
 
 | Workload | Shape |
 | --- | --- |
@@ -21,7 +25,8 @@ lookup, replacement and splicing, typed fields, whole-tree traversal and 100
 successive edits. Inputs are fully evaluated before timing, and each case
 consumes its result: rendered text, a cached length, or a strict sum of visited
 ranges. `bench/Fixtures.hs` checks every workload against independently built
-text before measuring (`graft-bench --check`).
+text before measuring (`graft-bench --check`). Cases added since then are
+described in the entries that use them.
 
 Each timing pass asks `tasty-bench` for a relative standard deviation of 2%,
 with a three-second limit per case, and the suite runs twice. Times are CPU
@@ -29,13 +34,13 @@ time including garbage collection. Allocation is per operation. Separate
 processes measure residency: the live heap after a full collection, minus the
 live heap at startup.
 
-Both runs used GHC 9.12.2 with `-O2` on an Intel Xeon w3-2435 under Fedora
+All three runs used GHC 9.12.2 with `-O2` on an Intel Xeon w3-2435 under Fedora
 Linux, pinned to CPU 2 with the `powersave` governor. Other activity on the
 machine was not controlled.
 
 | Run | Code measured | Results |
 | --- | --- | --- |
-| 2026-10-10 | List children, before the review changes | [timing 1](../bench/results/2026-10-10/timing-1.csv), [timing 2](../bench/results/2026-10-10/timing-2.csv), [residency](../bench/results/2026-10-10/residency.csv), [environment](../bench/results/2026-10-10/environment.json) |
+| 2026-10-10 | List children, before the 2026-10-17 changes | [timing 1](../bench/results/2026-10-10/timing-1.csv), [timing 2](../bench/results/2026-10-10/timing-2.csv), [residency](../bench/results/2026-10-10/residency.csv), [environment](../bench/results/2026-10-10/environment.json) |
 | 2026-10-17 | Array children, cursor edits, single-buffer rendering | [timing 1](../bench/results/2026-10-17/timing-1.csv), [timing 2](../bench/results/2026-10-17/timing-2.csv), [residency](../bench/results/2026-10-17/residency.csv), [environment](../bench/results/2026-10-17/environment.json) |
 | 2026-10-17b | As above, plus a single-pass builder and unpacked tokens | [timing 1](../bench/results/2026-10-17b/timing-1.csv), [timing 2](../bench/results/2026-10-17b/timing-2.csv), [residency](../bench/results/2026-10-17b/residency.csv), [environment](../bench/results/2026-10-17b/environment.json) |
 
@@ -103,8 +108,8 @@ Deep cases are bounded by depth, which the array representation doesn't
 change. Construction allocates more per level than before (1.2 MiB rather than
 0.8 MiB), because each node now holds two small arrays.
 
-The chain workload is new. Before the review, whole-tree traversal was
-quadratic in depth. A separate measurement of the code before the review
+The chain workload is new. Before the 2026-10-17 changes, whole-tree
+traversal was quadratic in depth. A separate measurement of the 2026-10-10 code
 took 346 ms and allocated 1.8 GB to visit every token of a 4,000-operator
 chain; the 10,000-operator chain now takes 1.8 ms.
 
@@ -198,7 +203,6 @@ almost nothing, allocates, and walking up a very deep cursor is slower.
 | --- | ---: | ---: |
 | The tree after renaming every `Name` | 0.428 MB, 18.8 MB allocated | 0.428 MB, 3.7 MB allocated |
 | The cursor on the last token after renaming | 0.429 MB | 0.765 MB |
-
 | The last cursor after 10 renaming passes through one chain of cursors | 0.429 MB | 0.902 MB |
 | The last cursor after 100 passes | 0.429 MB | 0.902 MB |
 | Every cursor that one renaming walk visits | 17.3 MB | 1.81 MB |
@@ -214,15 +218,19 @@ the document's child array.
 
 ### Typed casts on edited cursors (2026-10-26)
 
-`Ast.matchNode` and `Ast.matchToken` read the kind and whether the focus is a
-token with `Cursor.kind` and `Cursor.isToken`, instead of matching on
-`Cursor.green`, which builds a node edited through the cursor. Before,
-`Ast.parent` or `Ast.ancestors` on each token of a renaming walk built every
-edited ancestor again after each edit, so the walk was quadratic in the width
-of the edited nodes. `rename-all-groups` reads the ranges of each token's
-`Grouped` ancestors before renaming it. These are single passes on one
-machine with GHC 9.12.2, `--stdev 3` and a 32 MiB allocation area, not runs
-of `bench/run.py`.
+A typed walk that edits as it goes was still quadratic after the previous
+change. `Ast.matchNode` and `Ast.matchToken` told nodes from tokens by
+matching on `Cursor.green`, which builds a node that has been edited through
+the cursor. So `Ast.parent` or `Ast.ancestors` on each token of a renaming
+walk rebuilt every edited ancestor after each edit, at a cost proportional to
+its width. The casts now use `Cursor.kind` and the new `Cursor.isToken`,
+which build nothing.
+
+`rename-all-groups` renames every `Name` in the 1,000-line document and,
+before each rename, reads the ranges of the token's ancestors that cast to a
+typed view of line (`Group`) nodes. As in the previous entry, these are single
+passes on one machine with GHC 9.12.2, `--stdev 3` and a 32 MiB allocation
+area, not runs of `bench/run.py`.
 
 | Case | Before | After |
 | --- | ---: | ---: |
@@ -244,7 +252,8 @@ every ancestor through `Cursor.ancestors`: 658 µs and 3.5 MB in the same run.
 - Edits in very wide nodes copy the whole child array. A chunked or
   finger-tree child list would make them logarithmic, at a cost to access and
   memory in the common case.
-- Deep traversals allocate a cursor per occurrence. A traversal that reads only
-  green elements, or a fold, would avoid that when ranges aren't needed.
+- Traversals through cursors allocate a cursor per occurrence. `Green.foldM`,
+  added since these runs, avoids that when positions aren't needed; this log
+  doesn't yet record it.
 
 These results describe Graft alone and make no comparison with Rowan.
