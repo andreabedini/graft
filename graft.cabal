@@ -3,12 +3,12 @@ name:            graft
 version:         0.1.0.0
 synopsis:        Immutable, lossless concrete syntax trees
 description:
-    A small, idiomatic Haskell port of Rowan's concrete syntax infrastructure.
-    Green trees preserve token text, cache UTF-8 byte lengths, and support
-    structural sharing. Immutable red cursors provide navigation, source ranges,
-    and persistent subtree and child editing. Pure builders support positional
-    checkpoints and reuse of existing subtrees. Typed AST views retain concrete
-    syntax through cursors. Lexing and parsing are left to callers.
+    Lossless, immutable concrete syntax trees, modelled on rust-analyzer's
+    Rowan. Green trees keep every byte of the source, cache UTF-8 lengths and
+    share subtrees. Cursors navigate them, find syntax by byte offset, and edit
+    them persistently. Builders turn parser events into trees, and typed views
+    give a grammar's nodes typed accessors without a separate AST. Lexing and
+    parsing are left to the application.
 category:        Language
 license:         MIT
 license-files:   LICENSE licenses/ROWAN-MIT

@@ -50,19 +50,29 @@ Compare a new run with an earlier CSV file on the same machine:
 "$graft_bench" --baseline bench/results/2026-10-17/timing-1.csv --timeout 3s --stdev 2 +RTS -T -A32m -RTS
 ```
 
-Measure a specific retention policy:
+Measure what one retained result keeps alive:
 
 ```sh
 "$graft_bench" --residency history 10000 100 +RTS -T -RTS
 ```
 
-The two numbers specify document lines and successive edits. Sizes must be
-positive, and edit counts must be nonnegative. Policies are `tree`, `shared`,
-`latest`, `history`, `cursor`, and `detached-token`. `tree` retains the original
-document. `shared` repeats one existing line subtree. `latest` retains only the
-final edited root. `history` retains the original and every edited root.
-`cursor` retains one middle token cursor. `detached-token` retains only that
-cursor's green token. Only `latest` and `history` use the edit count.
+The arguments are a scenario, the number of document lines and the number of
+edits. Lines must be positive and edits nonnegative. The scenarios are:
+
+- `tree`: the original document.
+- `shared`: one line subtree repeated for every line.
+- `latest`: only the root after the edits.
+- `history`: the original and every edited root.
+- `cursor`: one cursor on a middle token.
+- `detached-token`: only that cursor's green token.
+- `renamed-tree`: the tree after renaming every `Name` token in one walk.
+- `renamed-cursor`: the last cursor of that walk.
+- `renamed-passes`: the last cursor after as many renaming passes as there
+  are edits, each starting from the previous pass's cursor.
+- `walk-cursors`: every cursor that one renaming walk visits.
+
+Only `latest`, `history` and `renamed-passes` use the edit count; the others
+ignore it.
 
 The CSV reports absolute live bytes, startup live bytes, their nonnegative
 difference, total allocation since startup collection, and an observed checksum.

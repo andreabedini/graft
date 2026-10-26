@@ -3,10 +3,13 @@
 ## Build and test
 
 ```sh
-cabal build all --ghc-options=-Werror
-cabal test all --test-show-details=direct
+cabal build all --enable-tests --enable-benchmarks --ghc-options=-Werror
+cabal test all --enable-tests --enable-benchmarks --ghc-options=-Werror --test-show-details=direct
 cabal haddock lib:graft
 ```
+
+The test command repeats the build flags so that cabal doesn't reconfigure and
+rebuild without `-Werror`.
 
 Graft is tested with GHC 9.8, 9.10, 9.12 and 9.14 (see `tested-with` in
 `graft.cabal`). There are four test suites:
@@ -39,14 +42,20 @@ Each property compares the library with a model that shares none of its code.
 `test/TestModel.hs` defines a plain rose tree of `String`s with no cached
 lengths and its own UTF-8 width function. Generated text includes multibyte
 characters, combining marks, CRLF, NUL and empty tokens, and shrinking never
-produces surrogate code points. Every property runs 1,000 cases, and
-`checkCoverage` confirms that the generators reach the interesting cases (root
-and nested targets, nodes and tokens).
+produces surrogate code points. Every property runs 1,000 cases. The
+replacement and navigation properties use `checkCoverage` to confirm that the
+generators reach root and nested targets, nodes and tokens.
 
 The suites are grouped by module:
 
-- `test/Main.hs`: rendering, cached lengths, path edits, cursor navigation,
-  offset lookup, covering ranges and edits through cursors.
+- `test/Main.hs`: rendering, cached lengths, replacement at every path,
+  cursor navigation, offset lookup and covering ranges. Expectations are
+  stated by path, through helpers in `TestModel.hs` written with cursors.
+- `test/CursorEditTests.hs`: random programs of moves, replacements and
+  lookups, run on a cursor and on the model, so that edits are checked while
+  the cursor keeps moving.
+- `test/FoldTests.hs`: `Green.foldM`, `fold`, `map` and `traverse` against the
+  model, and forcing and hashing.
 - `test/BuilderTests.hs`: builders, checked against a separate tree model that
   streams start, token and finish events, including checkpoint wrapping and the
   `Build` monad.
@@ -55,7 +64,7 @@ The suites are grouped by module:
 - `test/AstTests.hs`: typed-view laws, fields, ancestors and edits through views.
 - `test/LineIndexTests.hs`: line and column conversion against a `String` oracle.
 
-Each group ends with deterministic regressions for edge cases: empty nodes and
+Most groups end with deterministic regressions for edge cases: empty nodes and
 tokens, extreme indices such as `maxBound`, and shared trees whose logical length
 (`2 ^ hugeDepth` bytes) is far larger than anything that could be rendered.
 
@@ -66,9 +75,9 @@ compare results. [`docs/performance.md`](docs/performance.md) records the
 current baseline. Rerun the baseline when a change affects performance, and keep
 the raw results under `bench/results/<date>/` rather than editing tables by hand.
 
-Keep each commit to one concern.
-
 ## Commit messages
+
+Keep each commit to one concern.
 
 Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/). For example:
 
@@ -79,7 +88,7 @@ refactor(cursor)!: exclude the focus from ancestors
 docs(cursor): state the real cost of a run of cursor edits
 ```
 
-The allowed types are `feat`, `fix`, `perf`, `docs`, `ci`, `test`, `refactor`, `build`, `chore`, `style` and `revert`. A scope in parentheses is optional. `!` before the colon, or a `BREAKING CHANGE:` footer, marks a breaking change. The `commits` CI job checks every commit of a pull request with [git-cliff](https://git-cliff.org/), so the allowed types are the ones that the commit parsers in `cliff.toml` know. jj does not run git hooks, so this check is the only one.
+The allowed types are `feat`, `fix`, `perf`, `docs`, `ci`, `test`, `refactor`, `build`, `chore`, `style` and `revert`. A scope in parentheses is optional. `!` before the colon, or a `BREAKING CHANGE:` footer, marks a breaking change. The `commits` CI job checks every commit of a pull request with [git-cliff](https://git-cliff.org/), so the allowed types are the ones that the commit parsers in `cliff.toml` know. There is no local commit hook, so this CI job is the only check.
 
 The commit types choose the next version:
 
