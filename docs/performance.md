@@ -212,6 +212,25 @@ passes is the same. Keeping every cursor of a walk costs far less than
 before, when each cursor that had left an edited line held its own copy of
 the document's child array.
 
+### Typed casts on edited cursors (2026-10-26)
+
+`Ast.matchNode` and `Ast.matchToken` read the kind and whether the focus is a
+token with `Cursor.kind` and `Cursor.isToken`, instead of matching on
+`Cursor.green`, which builds a node edited through the cursor. Before,
+`Ast.parent` or `Ast.ancestors` on each token of a renaming walk built every
+edited ancestor again after each edit, so the walk was quadratic in the width
+of the edited nodes. `rename-all-groups` reads the ranges of each token's
+`Grouped` ancestors before renaming it. These are single passes on one
+machine with GHC 9.12.2, `--stdev 3` and a 32 MiB allocation area, not runs
+of `bench/run.py`.
+
+| Case | Before | After |
+| --- | ---: | ---: |
+| `rename-all-groups`, 1,000 lines | 13.5 ms, 65 MB allocated | 669 µs, 3.5 MB |
+
+The typed walk now costs the same as `rename-all-ancestors`, which reads
+every ancestor through `Cursor.ancestors`: 658 µs and 3.5 MB in the same run.
+
 ## What the numbers suggest
 
 - Memory per token is the largest remaining cost. Each token occupies an array

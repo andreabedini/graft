@@ -173,6 +173,38 @@ propNodeEdit subtree replacement =
               , observe (toCursor view) === oracle model path
               ]
 
+-- Typed casts from every token of a walk that renames as it goes, where the
+-- ancestors hold edits that are not built yet, agree with a fresh cursor on
+-- the edited tree.
+propEditedCasts :: Model -> Property
+propEditedCasts start = forAll genText $ \newText ->
+  case Cursor.firstToken (Cursor.fromGreen (compile start)) of
+    Nothing -> property True
+    Just first -> walk newText first start
+  where
+    walk newText cursor model =
+      let path = Cursor.path cursor
+          (renamed, model')
+            | Cursor.kind cursor == Name =
+                (Cursor.replace (compile (Leaf Name newText)) cursor, modelReplace path (Leaf Name newText) model)
+            | otherwise = (cursor, model)
+      in case Cursor.at path (Cursor.fromGreen (compile model')) of
+        Left err -> counterexample (show err) False
+        Right fresh -> conjoin
+          [ casts renamed === casts fresh
+          , case Cursor.nextToken renamed of
+              Nothing -> Cursor.tree renamed === compile model'
+              Just next -> walk newText next model'
+          ]
+    casts cursor =
+      ( fmap (observe . toCursor) (fromCursor cursor :: Maybe NameView)
+      , map (observe . toCursor) (Ast.ancestors cursor :: [AnyNode])
+      , map (observe . toCursor) (Ast.ancestors cursor :: [GroupView])
+      , fmap (\above -> ( map (observe . toCursor) (Ast.children above :: [AnyNode])
+                        , map (observe . toCursor) (Ast.tokens above :: [AnyToken])))
+          (Cursor.parent cursor)
+      )
+
 -- These predicates fail if first-match queries force a later cast.
 newtype StopNode = StopNode (Cursor Kind)
 instance AstView StopNode where
@@ -225,5 +257,6 @@ astProperties =
   , ("typed parents and ancestors", property propParents)
   , ("exact-preserving edits through typed tokens", property propTokenEdit)
   , ("persistent child edits through typed nodes", property propNodeEdit)
+  , ("typed casts during a renaming walk", property propEditedCasts)
   , ("typed malformed, shared-occurrence, lazy-query and large-range regressions", regressions)
   ]

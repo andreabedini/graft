@@ -63,7 +63,6 @@ module Graft.Ast
 import Data.Maybe (listToMaybe, mapMaybe)
 import Graft.Cursor (Cursor)
 import qualified Graft.Cursor as Cursor
-import Graft.Green.Internal (GreenElement (..), GreenNode (..), GreenToken (..))
 
 -- | A typed view of a node or a token, usually a newtype around a 'Cursor'.
 -- Declare an 'AstNode' or 'AstToken' instance too, to say which it is.
@@ -99,18 +98,19 @@ class AstView view => AstToken view
 -- | @matchNode accepts wrap@ is a 'fromCursor' for an 'AstNode' view. It wraps
 -- any node whose kind satisfies @accepts@, as in
 -- @fromCursor = Ast.matchNode (== CallKind) Call@, and rejects tokens. It
--- doesn't look at the node's children.
+-- doesn't look at the node's children, so it doesn't build a node edited
+-- through the cursor; see 'Cursor.replace'.
 matchNode :: (kind -> Bool) -> (Cursor kind -> view) -> Cursor kind -> Maybe view
-matchNode accepts wrap cursor = case Cursor.green cursor of
-  Node (GreenNode nodeKind _ _ _) | accepts nodeKind -> Just (wrap cursor)
-  _ -> Nothing
+matchNode accepts wrap cursor
+  | not (Cursor.isToken cursor), accepts (Cursor.kind cursor) = Just (wrap cursor)
+  | otherwise = Nothing
 
 -- | The 'AstToken' counterpart of 'matchNode'. It rejects nodes and checks
 -- only the kind, not the text.
 matchToken :: (kind -> Bool) -> (Cursor kind -> view) -> Cursor kind -> Maybe view
-matchToken accepts wrap cursor = case Cursor.green cursor of
-  Token (GreenToken tokenKind _ _) | accepts tokenKind -> Just (wrap cursor)
-  _ -> Nothing
+matchToken accepts wrap cursor
+  | Cursor.isToken cursor, accepts (Cursor.kind cursor) = Just (wrap cursor)
+  | otherwise = Nothing
 
 -- | The first child node that casts to the view, or 'Nothing'. Only direct
 -- children are searched.
@@ -120,7 +120,7 @@ child = listToMaybe . children
 -- | Every child node that casts to the view, in source order. The list is
 -- lazy.
 children :: AstNode view => Cursor (AstViewKind view) -> [view]
-children = mapMaybe fromCursor . filter isNode . Cursor.children
+children = mapMaybe fromCursor . filter (not . Cursor.isToken) . Cursor.children
 
 -- | The parent, if it casts to the view. Ancestors further up are not
 -- searched; use 'ancestors' for that.
@@ -141,9 +141,4 @@ token = listToMaybe . tokens
 -- child nodes are not included; 'Cursor.descendantTokens' finds those. The
 -- list is lazy.
 tokens :: AstToken view => Cursor (AstViewKind view) -> [view]
-tokens = mapMaybe fromCursor . filter (not . isNode) . Cursor.children
-
-isNode :: Cursor kind -> Bool
-isNode cursor = case Cursor.green cursor of
-  Node _ -> True
-  Token _ -> False
+tokens = mapMaybe fromCursor . filter Cursor.isToken . Cursor.children
