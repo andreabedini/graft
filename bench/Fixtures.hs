@@ -6,7 +6,7 @@ module Fixtures
   ( Kind (..), Prepared (..), PreparedCursor (..), Named (..), Numbered (..), Grouped (..)
   , wideSource, wideTree, deepTree, chainTree, chainSource, documentTree, documentSource
   , forceElement, checked, selected, cached, cursorEnd, siblingSum
-  , buildTokens, buildMonadic, buildReuse, buildWrapped, editMany, snapshots, renameWalk, renamePasses, renameVisits
+  , buildTokens, buildMonadic, buildReuse, buildWrapped, editMany, snapshots, Scope (..), renameWalk, renamePasses, renameVisits
   , checkFixtures
   ) where
 
@@ -167,31 +167,38 @@ editMany count path root = List.foldl' step root [1 .. count]
             (checked (Cursor.at path (Cursor.fromGreen previous))))
       in Green.length updated `seq` updated
 
+-- What a renaming walk reads before renaming each token, as a rename that
+-- checks scopes would: nothing, the ranges of its ancestors, or the ranges
+-- of its ancestors that cast to Grouped.
+data Scope = Everywhere | InAncestors | InGroups
+
 -- Rename every Name token through one cursor, as in the Graft.Cursor
--- example, and return the cursor on the last token. With ancestors, every
--- token also reads the ranges of its ancestors first, as a rename that
--- checks scopes would.
-renameWalk :: Bool -> GreenElement Kind -> Maybe (Cursor Kind)
-renameWalk ancestors input = fmap List.last (renameVisits ancestors (Cursor.fromGreen input))
+-- example, and return the cursor on the last token.
+renameWalk :: Scope -> GreenElement Kind -> Maybe (Cursor Kind)
+renameWalk scope input = fmap List.last (renameVisits scope (Cursor.fromGreen input))
 
 -- Every cursor that a renaming walk from the root visits, after any edit.
-renameVisits :: Bool -> Cursor Kind -> Maybe [Cursor Kind]
-renameVisits ancestors start = go <$> Cursor.firstToken (Cursor.root start)
+renameVisits :: Scope -> Cursor Kind -> Maybe [Cursor Kind]
+renameVisits scope start = go <$> Cursor.firstToken (Cursor.root start)
   where
     go cursor = renamed : maybe [] go (Cursor.nextToken renamed)
       where
         renamed
-          | (not ancestors || ancestorEnds cursor > 0) && Cursor.kind cursor == Name =
+          | inScope cursor && Cursor.kind cursor == Name =
               Cursor.replace (Token (Green.token Name "renamed")) cursor
           | otherwise = cursor
-    ancestorEnds = List.foldl' (\total ancestor -> total + cursorEnd ancestor) 0 . Cursor.ancestors
+    inScope cursor = case scope of
+      Everywhere -> True
+      InAncestors -> ends (Cursor.ancestors cursor) > 0
+      InGroups -> ends (map toCursor (Ast.ancestors cursor :: [Grouped])) > 0
+    ends = List.foldl' (\total ancestor -> total + cursorEnd ancestor) 0
 
 -- The renaming walk repeated through one chain of cursors, each pass
 -- starting from the root of the last cursor of the previous one.
 renamePasses :: Int -> GreenElement Kind -> Cursor Kind
 renamePasses count input = List.foldl' pass (Cursor.fromGreen input) [1 .. count]
   where
-    pass cursor _ = let next = maybe cursor List.last (renameVisits False cursor)
+    pass cursor _ = let next = maybe cursor List.last (renameVisits Everywhere cursor)
       in cursorEnd next `seq` next
 
 snapshots :: Int -> Path -> GreenElement Kind -> [GreenElement Kind]
@@ -213,6 +220,7 @@ checkFixtures = do
       path = [499, 2]
       cursor = checked (Cursor.at path (Cursor.fromGreen document))
       updated = editMany 100 path document
+      renamed = fmap Cursor.tree (renameWalk Everywhere document)
       expected = Text.concat [documentSource 499, Text.concat
         ["名500", "  = ", "100", " -- keep", "\r\n"],
         Text.concat (concatMap lineText [501 .. 1000])]
@@ -221,6 +229,7 @@ checkFixtures = do
   assert "focus/path edit agreement" (Cursor.tree (Cursor.replace (Token (Green.token Number "100")) cursor) == updated)
   assert "original snapshot preserved" (Green.render document == before)
   assert "typed groups" (length (Ast.children (Cursor.fromGreen document) :: [Grouped]) == 1000)
+  assert "scoped renames" (all (\scope -> fmap Cursor.tree (renameWalk scope document) == renamed) [InAncestors, InGroups])
   assert "history count" (length (snapshots 100 path document) == 101)
   putStrLn "Benchmark fixtures and observations: PASS"
   where
