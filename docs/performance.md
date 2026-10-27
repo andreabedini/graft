@@ -239,6 +239,100 @@ area, not runs of `bench/run.py`.
 The typed walk now costs the same as `rename-all-ancestors`, which reads
 every ancestor through `Cursor.ancestors`: 658 µs and 3.5 MB in the same run.
 
+### Read-only cursors and edit plans (2026-10-27)
+
+Cursors lost their edits and shrank to four fields, and `Graft.Edit` took
+over editing: `apply` makes a plan of edits against the tree they refer to,
+and `rewrite` visits a tree top-down and replaces as it goes
+([architecture](architecture.md)). The cases that edit were rewritten over
+the new API, so the "before" and "after" columns time the same task done
+the way each design does it: `edit-each-child` was a cursor walk and is a
+rewrite; `replace-*`, `replace-path`, the focused `replace` and the 100
+document edits were `Cursor.replace` and `Cursor.tree` and are plans of one
+edit; `rename-all*` renamed through one cursor and are rewrites that read
+the same things before each rename. New cases: `plan-each-child`, the same
+change as `edit-each-child` as a plan with one edit per child;
+`apply-sparse-k`, a plan replacing the name of `k` lines spread over the
+document, and `text-edits-1000` for its largest plan; and
+`apply-from-equal-tree`, one edit whose cursor is in an equal document built
+separately, so that `apply` compares the trees instead of recognising the
+base.
+
+Both columns are single passes on one machine in one sitting, with GHC
+9.12.2, `-O2`, `--stdev 3`, a 32 MiB allocation area and the process pinned
+to CPU 2, not runs of `bench/run.py`; the "before" build is the `main`
+revision `7a36b16`. The plan cases were timed a second time after two fixes
+that the first pass prompted: `apply` had laid out every untouched child of
+a rebuilt node through lists, at 470 bytes and 80 ns per child, and now
+copies the untouched runs of the child array as blocks, shifts their offsets
+and measures only the new elements, reusing the offsets when no patch
+changes the layout. Times are in microseconds.
+
+| Case | Before | After |
+| --- | ---: | ---: |
+| Wide, 10,000: child by index from a fresh cursor | 0.038–0.042 | 0.030 |
+| Wide, 10,000: iterate all siblings | 273 | 48.6 |
+| Wide, 10,000: all typed tokens | 464 | 405 |
+| Wide, 10,000: replace the first, middle, last child | 13.6, 13.3, 10.5 | 17.5, 15.3, 13.5 |
+| Wide, 100 / 1,000 / 10,000: `edit-each-child` | 17.2 / 167 / 2,272 | 4.79 / 47.1 / 590 |
+| Wide, 10,000: `plan-each-child` | — | 3,281 |
+| Wide, 10,000: `edit-parent-once` | 349 | 347 |
+| Deep, 10,000: descend to the leaf | 357 | 243 |
+| Deep, 10,000: prepared cursor to the root | 46.1 | 30.9 |
+| Deep, 10,000: replace at a path | 550 | 2,036 |
+| Deep, 10,000: replace through a prepared cursor | 223 | 1,824 |
+| Chain, 10,000: all tokens | 2,133 | 1,879 |
+| Document: all token ranges | 328 | 281 |
+| Document: all typed line nodes | 47.8 | 39.4 |
+| Document: 100 successive edits, latest / all versions | 84.3 / 90.4 | 113 / 109 |
+| Document: `rename-all` / `-ancestors` / `-groups` | 595 / 807 / 964 | 300 / 504 / 454 |
+| Document: `apply-sparse` 1 / 10 / 100 / 1,000 | — | 1.86 / 5.64 / 38.4 / 411 |
+| Document: `text-edits-1000` | — | 507 |
+| Document: `apply-from-equal-tree` | — | 97.5 |
+
+Allocation moved with the times: `rename-all` from 3.05 MB to 1.57 MB,
+`edit-each-child` at 10,000 from 11.3 MB to 2.88 MB, a replacement in the
+wide node from 160 KB to 161 KB, and the 100 document edits from 0.93 MB to
+1.06 MB.
+
+| Retained result, 1,000 lines | Before | After |
+| --- | ---: | ---: |
+| The original tree | 0.449 MB | 0.449 MB |
+| A cursor on a middle token | 0.450 MB | 0.449 MB |
+| The tree after renaming every `Name` | 0.425 MB | 0.377 MB |
+| A cursor on that tree's last token (before: the cursor that renamed) | 0.738 MB | 0.378 MB |
+| The same after 10 and after 100 renaming passes | 0.899 MB | 0.377 MB |
+| Every cursor a renaming walk visits (before: tokens; after: every element) | 1.78 MB | 0.929 MB |
+
+At 10,000 lines the renamed tree takes 4.27 MB before and 3.76 MB after, and
+the cursor 7.39 MB before and 3.76 MB after. A cursor now retains the tree it
+is in and nothing else. The renamed tree is smaller after because the
+rewrite's replacement token is one shared value where the walk built one per
+token; that is the fixture, not the library.
+
+What the pass found:
+
+- Navigation is faster and smaller across the board, as the four-field
+  cursor predicted: a fresh child costs what it did before 2026-10-19,
+  sibling iteration over 10,000 children is five times faster, and deep
+  descents and typed walks gained 15–30%.
+- A rewrite does the renaming walk in half the time and half the allocation
+  of the editing cursor, and a dense change through a rewrite is five times
+  faster than the same change as a plan with one edit per child, which pays
+  for a trie entry and a path per edit. That is the division of labour the
+  design intended.
+- A plan of one edit costs a fixed 0.3 µs more than the old cursor edit for
+  resolving the cursor, building the trie and validating, and the same array
+  copy after that. On the 1,000-line document that is 1.9 µs per edit
+  against 0.84. Through a 10,000-level chain it is 2.0 ms against 0.55: each
+  level costs a trie node, a layout and a one-child patch where the cursor
+  copied one child. A plan of a single edit could walk the cursor's parent
+  chain instead of building a trie; this log notes it as the candidate if a
+  real tree is that deep.
+- Comparing an equal tree built separately costs 97 µs on the 1,000-line
+  document, fifty times the edit it validates. The pointer test is what
+  makes the normal case cheap, and it is an optimisation, not a bound.
+
 ## What the numbers suggest
 
 - Memory per token is the largest remaining cost. Each token occupies an array
@@ -246,14 +340,13 @@ every ancestor through `Cursor.ancestors`: 658 µs and 3.5 MB in the same run.
   identical tokens such as `;` or a single space. A node cache
   like Rowan's could share them. Its value depends on duplicate rates in real
   parser output, which haven't been measured.
-- A cursor kept after a run of edits holds the original version of each
-  edited node. Building an edited node could drop it, at the cost of making
-  the cursor's fields mutable or rebuilding the cursor.
 - Edits in very wide nodes copy the whole child array. A chunked or
   finger-tree child list would make them logarithmic, at a cost to access and
   memory in the common case.
-- Traversals through cursors allocate a cursor per occurrence. `Green.foldM`,
-  added since these runs, avoids that when positions aren't needed; this log
-  doesn't yet record it.
+- A plan of one edit on a very deep path pays per level for machinery that a
+  single edit doesn't need; walking the cursor's parent chain would remove
+  it.
+- Traversals through cursors allocate a cursor per occurrence. `Green.foldM`
+  avoids that when positions aren't needed; this log doesn't yet record it.
 
 These results describe Graft alone and make no comparison with Rowan.

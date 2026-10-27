@@ -20,9 +20,10 @@ The same short name can appear in several modules, such as `children` in
 type. The `Graft` module exports only the types and classes, so that they can
 be used unqualified alongside the qualified functions.
 
-Edits inside a tree go through a cursor: `Graft.Green` edits the children of a
-single node, and `Graft.Cursor` carries the edit up through the ancestors. To
-edit at a path, move there with `Cursor.at` and edit the cursor.
+Edits inside a tree go through `Graft.Edit`: `Graft.Green` edits the children
+of a single node, a plan applies a list of edits described through cursors to
+the tree they were made on, and a rewrite visits a tree top-down and replaces
+elements as it goes. Cursors themselves only read.
 
 ## Green trees
 
@@ -78,15 +79,16 @@ a parent node without re-allocating it.
 | Operation | Cost |
 | --- | --- |
 | Length of a node or token | Constant |
-| Child by index, first or last child, sibling | Constant; below a node with replaced children, a child by index is linear in the number replaced before it |
-| Token or element at an offset | Logarithmic in the width of each level, times depth |
+| Child by index, first or last child, sibling, parent | Constant |
+| Path or root of a cursor | Linear in the depth |
+| Token or element at an offset | Logarithmic in the width of each level, times depth, plus any empty children at the offset |
 | Building a node | Linear in its number of children |
-| Replacing a child | Linear in the parent's width: the array is copied, and the length is adjusted by the difference |
-| Moving up or sideways from an edited element, the first time | Logarithmic in the number of the parent's replaced children: the edit is recorded, not copied |
-| Reading an edited node | Linear in its width, once per version of the node |
-| `Cursor.tree` after edits | Linear in the width of each edited node up to the root, on every call |
-| Splicing children | Linear in the parent's width plus the replacements |
-| Rendering | Linear in the output |
+| Replacing a child of one node | Linear in the parent's width: the array is copied, and the length is adjusted by the difference |
+| Splicing children of one node | Linear in the parent's width plus the replacements |
+| `Edit.apply` | Linear in the edits, their paths, and the widths of the nodes above them; the trees are compared when a cursor isn't from the base itself |
+| `Edit.rewrite` | Linear in the elements visited, which covers rebuilding the nodes above the replacements |
+| `Edit.textEdits` | As `Edit.apply`, plus rendering the replacements |
+| Rendering | Linear in the elements and the output |
 
 No edit traverses descendants it doesn't change. Equality is structural
 but returns immediately for physically identical nodes, so comparing two
@@ -100,50 +102,95 @@ question that needs measurements from real parsers.
 
 ## Cursors
 
-A cursor is a zipper. It holds the focused element, its absolute offset and
-length, its index in the parent, and the parent's cursor, and so on up to the
-root. Moving down, up or sideways is constant time, apart from the edits
-described below, and the cursor computes absolute ranges from the cached child
-offsets.
+A cursor is a zipper: the focused element, its absolute offset, its index in
+the parent, and the parent's cursor, and so on up to the root. Moving down, up
+or sideways is constant time, and the cursor computes absolute ranges from the
+cached child offsets. Navigation never performs transformation work: a
+cursor's fields are values, and there is no edit state that an observer could
+force. A cursor retains its parent chain and, through it, the whole tree, and
+nothing else. Lists such as `children` and `descendants` are lazy, cost a
+cursor per element consumed, and buy early exit; one step of `descendants`
+can cost up to the depth, returning from a finished branch.
 
-`Cursor.replace` copies nothing. It returns a cursor on the new focus whose
-parent is a thunk: the old parent, with the new focus added to a map of its
-replaced children. The first move up or sideways forces the thunk, recording
-the edit in time logarithmic in the size of the map, and leaves the
-grandparent as a thunk of the same kind. Every cursor that later passes
-through that parent shares the result, so a walk that edits many tokens, and
-reads the ancestors of each, records each edit in each ancestor once.
-
-An edited node is built only when something reads its green element. Until
-then it serves its children from the original node and the map, so moving
-among them copies nothing. `Cursor.green`, `Cursor.text`, `Cursor.modify`,
-`Cursor.tokenAt`, `Cursor.covering` and the child edits read the element and
-build the node, with one copy of its child array, and every cursor on that
-version of the node shares it. `Cursor.kind`, `Cursor.isToken`,
-`Cursor.range` and the casts in `Graft.Ast` don't, so a walk that inspects its
-ancestors without reading their elements stays linear. `Cursor.tree` builds
-the nodes from the edits up to the root in one pass, and again on each call.
-Renaming every token of an n-token list through one cursor and then taking
-the tree therefore takes time roughly proportional to n, as editing the list
-node once with `Cursor.modify` does.
-
-The cost is memory: until a cursor on an edited version is dropped, it keeps
-each edited node as it was before the edits, and the replaced elements with
-it.
-
-Edits are persistent. The cursor you started with still sees the original tree,
-and so does every cursor derived from it before the edit. Paths and byte ranges
-in the edited tree can differ from those in the original; a cursor derived from
-the edited cursor sees the new ones. There is no occurrence identity across
-versions: Graft can't tell you where an element of the old tree went in the new
-one.
+Cursors are read-only. An earlier design let a cursor record edits as it
+moved and build the edited nodes when they were read. The cost of an
+observation then depended on which thunk it forced, the documentation had to
+list which observers built an edited node, and three successive changes each
+found an observer that was accidentally quadratic. Edits now live in
+`Graft.Edit`, and `Cursor.tree` is the whole tree the cursor is in.
 
 Rowan has separate node and token cursors, and offers mutable red trees
-(`clone_for_update`) so that edits are visible through every handle. Graft
-has one cursor type for both and no mutation; returning a cursor from each edit gives the same ability to keep
-working after an edit, without shared mutable state. Rowan's `ancestors`
-starts with the node itself; Graft's `Cursor.ancestors` and `Ast.ancestors`
-start with the parent, while `Cursor.descendants` starts with the focus.
+(`clone_for_update`) so that edits are visible through every handle. Graft has
+one cursor type for both and no mutation. Rowan's `ancestors` starts with the
+node itself; Graft's `Cursor.ancestors` and `Ast.ancestors` start with the
+parent, while `Cursor.descendants` starts with the focus.
+
+## Edits
+
+`Graft.Edit` makes changes that are described against a tree as it is and
+made all at once. It has two entry points, for two workloads.
+
+A plan is a list of edits, each made with a cursor on the base tree:
+`Edit.replace` an element, `Edit.splice` a range of a node's children, or
+`Edit.insertBefore`, `Edit.insertAfter` and `Edit.remove` a child among its
+siblings. `Edit.apply` makes them together. Every cursor and child position
+refers to the base, so an edit never shifts another: replacing children 2 and
+7 replaces those two original children, whatever happens to the lengths or the
+children between them. At each node with an edit, the new children are, for
+each boundary from the first to the last, the insertions at that boundary in
+the order of the list, then the child, which is the elements of a splice that
+starts there, or nothing if an earlier splice consumed it, or its replacement,
+or the child itself, rebuilt if an edit lies below it and shared otherwise.
+Apart from the order of insertions at one boundary, the result does not depend
+on the order of the list.
+
+A plan is rejected when a replacement and any other edit apply at or below the
+same element; when a splice consumes a child that another edit applies to or
+below, which an insertion strictly inside the splice's range does and one at
+either end does not; or when two splices of one node have ranges `[a, b)` and
+`[c, d)` with `a < d` and `c < b`. Each error names the edits by their
+positions in the list. Every edit's cursor must be in a tree equal to the
+base. That is compatibility, not provenance: `apply` cannot tell where a
+cursor came from, but equality of the whole tree guarantees that its path,
+range and context mean the same thing in the base, which equality of the
+target alone would not. For a cursor made from the base the comparison is a
+pointer test; a cursor from an equal tree built separately is accepted after
+a structural comparison, which can cost the size of the tree, and that is why
+`apply` needs `Eq` on the kind. Evaluating the result to `Right` completes the
+validation and every rebuilt node; replacement elements and the shared parts
+of the base are as evaluated as they were given.
+
+`Edit.textEdits` gives the same plan as changes to the source text, with
+UTF-8 byte ranges in the base's text, for `Graft.LineIndex` to convert for an
+editor. It runs the same merge as `apply`, so insertions at boundaries that
+share an offset, as the boundaries of an empty element do, come out in the
+order of the result, and it merges edits that touch, so that no two share an
+offset. Patching the original text with them renders the result of `apply`.
+
+A rewrite, `Edit.rewrite` or `Edit.rewriteM`, visits a tree top-down and
+calls a function on each element with a cursor on the original tree and a
+context passed down from the ancestors. The function answers `Replace` with a
+new element, below which nothing is visited; `Descend`, which keeps the
+element's form and visits its children; `DescendWith` a new context; or
+`Skip`, which keeps the subtree unvisited. A node is rebuilt, once, exactly
+when a child reports a replacement, by a flag carried up and never by
+comparing trees, so `Replace` with the original element counts; a node with
+no replacement below it is returned as it is. `rewriteM` needs a monad rather
+than an applicative because the answer decides what is visited next; in
+`Either` it stops at the first failure, and in `StateT` it can collect the
+ranges it replaced, which are ranges in the original. It forces each rebuilt
+node before returning it through the monad. A rewrite suits a traversal that
+may change many elements, such as a rename that reads each token's ancestors;
+a plan suits a sparse set of targets found by analysis. The two share only
+the array copying underneath.
+
+Neither lets a later decision observe an earlier change inside one operation.
+When a second change depends on the first, apply the first and work on the
+result; the intermediate tree is paid for because it was asked for. The
+rebuilt nodes are the only new allocation that outlives an operation: a
+plan's trie, the paths, and the cursors a rewrite visits are garbage when it
+returns. There is no occurrence identity across versions: Graft can't tell you
+where an element of the old tree went in the new one.
 
 ## Lookup by offset
 
@@ -236,7 +283,10 @@ after an edit.
 ## Testing
 
 The tests compare the library with independent models that share none of its
-code, and a doctest suite checks the examples in the Haddock documentation;
+code: a plain rose tree for the green layer and the cursors, a merge written
+over lists and a predicate of the conflict rules for the plans, and a
+generated decision table for the rewrites. A doctest suite checks the examples
+in the Haddock documentation;
 [CONTRIBUTING.md](../CONTRIBUTING.md) describes both. The benchmark suite
 and its latest results are in [performance.md](performance.md).
 
@@ -256,7 +306,7 @@ and [formatting][tidy] tests.
 | `TextSize`, a `u32` byte count | `TextLength`, a newtype over `Int` |
 | Children with cached relative offsets | The same, in a `SmallArray` and a `PrimArray` |
 | Leading and trailing trivia on tokens | Trivia as ordinary tokens |
-| Separate node and token cursors, optionally mutable | One immutable cursor type; edits return a new cursor |
+| Separate node and token cursors, optionally mutable | One read-only cursor type; edits are plans and rewrites applied to a tree |
 | Mutable builder that asserts on misuse | Pure builder with structured errors, and a `Build` monad |
 | Node cache for interning | No interning |
 | `AstNode` and `AstToken` traits, `AstChildren` iterator, `SyntaxNodePtr` | An `AstView` class with `AstNode` and `AstToken` subclasses, and lazy lists; no location pointers |
@@ -268,7 +318,11 @@ and [formatting][tidy] tests.
   Ott), will provide the measurements.
 - Location handles: an equivalent of Rowan's `SyntaxNodePtr`, which finds an
   element again in a new version of the tree, needs rules for empty and nested
-  elements that share a range.
+  elements that share a range. Relocating a cursor from the base into the
+  result of `Edit.apply` is the same question.
+- Editing sessions: an operation in which a later decision sees an earlier
+  edit. Not planned until a workload needs it, and then with a cost analysis
+  fitted to its representation, which is the test of whether it should exist.
 - Trivia ownership, and how close to Rowan's API Graft should stay.
 - Incremental reparsing: Graft can splice a reparsed subtree into a tree, but
   has no support for deciding which subtree to reparse after a text edit. This
