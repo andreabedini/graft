@@ -10,6 +10,7 @@ import qualified Data.Text.IO as TextIO
 import Graft
 import qualified Graft.Ast as Ast
 import qualified Graft.Cursor as Cursor
+import qualified Graft.Edit as Edit
 import qualified Graft.Green as Green
 import Text.Read (readMaybe)
 
@@ -44,9 +45,11 @@ setNumberValue :: Integer -> NumberLiteral -> Maybe (GreenElement Kind)
 setNumberValue value literal = do
   oldValue <- numberValue literal
   let focus = toCursor literal
-  pure $ if oldValue == value
-    then Cursor.tree focus -- Same value: keep the spelling, such as 001.
-    else Cursor.tree (Cursor.replace (Token (Green.token Number (Text.pack (show value)))) focus)
+      tree = Cursor.tree focus
+  if oldValue == value
+    then pure tree -- Same value: keep the spelling, such as 001.
+    else either (const Nothing) Just $
+      Edit.apply tree [Edit.replace focus (Token (Green.token Number (Text.pack (show value))))]
 
 updateValue :: Integer -> GreenElement Kind -> Maybe (GreenElement Kind)
 updateValue value root = do

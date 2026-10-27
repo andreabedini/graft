@@ -22,8 +22,9 @@
 -- * "Graft.Green": immutable nodes and tokens with cached lengths, and edits
 --   to a node's children.
 -- * "Graft.Cursor": navigation, offset lookup and editing through a zipper.
--- * "Graft.Edit": rewriting a tree top-down, with every call seeing the
---   original and unchanged subtrees shared.
+-- * "Graft.Edit": edits described against a tree and made all at once,
+--   as a plan of edits or as a top-down rewrite, with the unchanged
+--   subtrees shared and the text edits for an editor.
 -- * "Graft.Build" and "Graft.Builder": building trees from a parser's events,
 --   in a monad or as a pure value.
 -- * "Graft.Ast": typed views of your grammar's nodes and tokens.
@@ -45,6 +46,7 @@
 -- >>> :set -XOverloadedStrings
 -- >>> import qualified Graft.Build as Build
 -- >>> import qualified Graft.Cursor as Cursor
+-- >>> import qualified Graft.Edit as Edit
 -- >>> import qualified Graft.Green as Green
 -- >>> import qualified Graft.Range as Range
 -- >>> data Kind = Root | Binding | Name | Number | Trivia deriving (Eq, Show)
@@ -62,8 +64,8 @@
 -- >>> let Just number = Cursor.covering (Range.fromLength 5 1) (Cursor.fromGreen (Node tree))
 -- >>> Cursor.text number
 -- "1"
--- >>> Green.render (Cursor.tree (Cursor.replace (Token (Green.token Number "42")) number))
--- "x  = 42 -- keep\r\n"
+-- >>> Green.render <$> Edit.apply (Node tree) [Edit.replace number (Token (Green.token Number "42"))]
+-- Right "x  = 42 -- keep\r\n"
 module Graft
   ( -- * Trees
     GreenNode
@@ -78,6 +80,9 @@ module Graft
   , TokenAtOffset (..)
   , WalkEvent (..)
     -- * Editing
+  , Edit
+  , EditError (..)
+  , TextEdit (..)
   , Change (..)
     -- * Ranges and positions
   , TextRange
@@ -99,7 +104,7 @@ import Graft.Ast (AstNode, AstToken, AstView (..))
 import Graft.Build (Build)
 import Graft.Builder (Builder, BuilderError (..), Checkpoint)
 import Graft.Cursor (Cursor, Path, PathError (..), TokenAtOffset (..), WalkEvent (..))
-import Graft.Edit (Change (..))
+import Graft.Edit (Change (..), Edit, EditError (..), TextEdit (..))
 import Graft.Green (ChildEditError (..), GreenElement (..), GreenNode, GreenToken, TextLength (..))
 import Graft.LineIndex (LineIndex, Utf16Position (..), Utf8Position (..))
 import Graft.Range (TextRange)

@@ -80,8 +80,6 @@ module Graft.Green
   , removeChild
   ) where
 
-import Control.DeepSeq (NFData (..))
-import Control.Exception (Exception)
 import Control.Monad.ST (ST, runST)
 import Data.Foldable (toList)
 import Data.Text (Text)
@@ -89,7 +87,7 @@ import qualified Data.Text as Text
 import qualified Data.Text.Array as Array
 import qualified Data.Text.Internal as Text (Text (..))
 import Data.Primitive.SmallArray (mapSmallArray')
-import Graft.Green.Internal (GreenElement (..), GreenNode (..), GreenToken (..), TextLength (..), textLengthOf)
+import Graft.Green.Internal (ChildEditError (..), GreenElement (..), GreenNode (..), GreenToken (..), TextLength (..), textLengthOf)
 import qualified Graft.Green.Internal as Internal
 import qualified Data.Traversable as Traversable
 import qualified Data.List as List
@@ -263,21 +261,6 @@ traverse action = go
     element (Token token') = Token <$> action token'
     element (Node child) = Node <$> go child
 
--- | Why a child edit failed. 'CannotEditTokenChildren' means the target is a
--- token; the others report a bad child position (or both positions of a
--- reversed range).
-data ChildEditError
-  = CannotEditTokenChildren
-  | NegativeChildBoundary !Int
-  | ReversedChildRange !Int !Int
-  | ChildBoundaryOutOfBounds !Int
-  deriving (Eq, Show)
-
-instance Exception ChildEditError
-
-instance NFData ChildEditError where
-  rnf err = err `seq` ()
-
 -- | Replace the child at a position. Each edit returns a new node and leaves
 -- the original usable; untouched children are shared between the two.
 replaceChild :: Int -> GreenElement kind -> GreenNode kind -> Either ChildEditError (GreenNode kind)
@@ -298,13 +281,10 @@ replaceChild index replacement parent
 spliceChildren
   :: Int -> Int -> [GreenElement kind] -> GreenNode kind
   -> Either ChildEditError (GreenNode kind)
-spliceChildren start end replacements parent
-  | start < 0 = Left (NegativeChildBoundary start)
-  | end < 0 = Left (NegativeChildBoundary end)
-  | end < start = Left (ReversedChildRange start end)
-  | start > Internal.childCount parent = Left (ChildBoundaryOutOfBounds start)
-  | end > Internal.childCount parent = Left (ChildBoundaryOutOfBounds end)
-  | otherwise = Right (Internal.spliceChildrenUnchecked start end replacements parent)
+spliceChildren start end replacements parent =
+  case Internal.spliceBoundsError start end parent of
+    Just err -> Left err
+    Nothing -> Right (Internal.spliceChildrenUnchecked start end replacements parent)
 
 -- | Insert a child before the given position; the number of children
 -- appends. As @spliceChildren index index [element]@.
