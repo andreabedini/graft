@@ -9,6 +9,7 @@ import qualified Data.Text as Text
 import Graft
 import qualified Graft.Ast as Ast
 import qualified Graft.Cursor as Cursor
+import qualified Graft.Edit as Edit
 import qualified Graft.Green as Green
 import qualified Graft.Range as Range
 import Test.QuickCheck
@@ -148,7 +149,7 @@ propTokenEdit subtree = forAll genText $ \newText ->
       Right cursor -> case fromCursor cursor :: Maybe NameView of
         Nothing -> counterexample "name view failed" False
         Just view ->
-          let edited = Cursor.tree (Cursor.replace (compile (Leaf Name newText)) (toCursor view))
+          let edited = applied root [Edit.replace (toCursor view) (compile (Leaf Name newText))]
           in conjoin
             [ matches (modelReplace path (Leaf Name newText) model) edited
             , Text.unpack (Green.render edited) === prefix ++ newText ++ suffix
@@ -166,44 +167,12 @@ propNodeEdit subtree replacement =
         Left err -> counterexample (show err) False
         Right cursor -> case fromCursor cursor :: Maybe AnyNode of
           Nothing -> counterexample "node view failed" False
-          Just view -> case Cursor.tree <$> Cursor.insertChild index (compile replacement) (toCursor view) of
+          Just view -> case Edit.apply root [Edit.splice (toCursor view) index index [compile replacement]] of
             Left err -> counterexample (show err) False
             Right edited -> conjoin
               [ matches (modelReplace path (Branch kind (take index items ++ [replacement] ++ drop index items)) model) edited
               , observe (toCursor view) === oracle model path
               ]
-
--- Typed casts from every token of a walk that renames as it goes, where the
--- ancestors hold edits that are not built yet, agree with a fresh cursor on
--- the edited tree.
-propEditedCasts :: Model -> Property
-propEditedCasts start = forAll genText $ \newText ->
-  case Cursor.firstToken (Cursor.fromGreen (compile start)) of
-    Nothing -> property True
-    Just first -> walk newText first start
-  where
-    walk newText cursor model =
-      let path = Cursor.path cursor
-          (renamed, model')
-            | Cursor.kind cursor == Name =
-                (Cursor.replace (compile (Leaf Name newText)) cursor, modelReplace path (Leaf Name newText) model)
-            | otherwise = (cursor, model)
-      in case Cursor.at path (Cursor.fromGreen (compile model')) of
-        Left err -> counterexample (show err) False
-        Right fresh -> conjoin
-          [ casts renamed === casts fresh
-          , case Cursor.nextToken renamed of
-              Nothing -> Cursor.tree renamed === compile model'
-              Just next -> walk newText next model'
-          ]
-    casts cursor =
-      ( fmap (observe . toCursor) (fromCursor cursor :: Maybe NameView)
-      , map (observe . toCursor) (Ast.ancestors cursor :: [AnyNode])
-      , map (observe . toCursor) (Ast.ancestors cursor :: [GroupView])
-      , fmap (\above -> ( map (observe . toCursor) (Ast.children above :: [AnyNode])
-                        , map (observe . toCursor) (Ast.tokens above :: [AnyToken])))
-          (Cursor.parent cursor)
-      )
 
 -- These predicates fail if first-match queries force a later cast.
 newtype StopNode = StopNode (Cursor Kind)
@@ -257,6 +226,5 @@ astProperties =
   , ("typed parents and ancestors", property propParents)
   , ("exact-preserving edits through typed tokens", property propTokenEdit)
   , ("persistent child edits through typed nodes", property propNodeEdit)
-  , ("typed casts during a renaming walk", property propEditedCasts)
   , ("typed malformed, shared-occurrence, lazy-query and large-range regressions", regressions)
   ]

@@ -420,7 +420,7 @@ propTextEdits model = forAll (genPlan base model) $ \planned ->
          , counterexample ("not sorted and apart: " ++ show texts) (apart texts)
          ]
        (Left err, Left err') -> err === err'
-       (applied, texts) -> counterexample (show (applied, texts)) False
+       (outcome, texts) -> counterexample (show (outcome, texts)) False
   where
     base = compile model
     apart texts = and (zipWith (\a b -> Range.end (editRange a) < Range.start (editRange b)) texts (drop 1 texts))
