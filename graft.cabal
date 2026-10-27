@@ -46,7 +46,7 @@ common warnings
 
 library
     import:           warnings
-    exposed-modules:  Graft Graft.Green Graft.Range Graft.Cursor Graft.Builder Graft.Build Graft.Ast Graft.LineIndex
+    exposed-modules:  Graft Graft.Green Graft.Range Graft.Cursor Graft.Edit Graft.Builder Graft.Build Graft.Ast Graft.LineIndex
     other-modules:    Graft.Green.Internal
     build-depends:
         base >=4.19 && <4.23,
@@ -78,15 +78,17 @@ test-suite graft-tests
     import:           warnings
     type:             exitcode-stdio-1.0
     main-is:          Main.hs
-    other-modules:    AstTests BuilderTests ChildEditTests CursorEditTests FoldTests LineIndexTests TestModel
+    other-modules:    AstTests BuilderTests ChildEditTests CursorEditTests EditTests FoldTests LineIndexTests TestModel
     hs-source-dirs:   test
     build-depends:
         base >=4.19 && <4.23,
+        containers >=0.6.8 && <0.9,
         deepseq >=1.5 && <1.6,
         graft,
         hashable >=1.4 && <1.6,
         QuickCheck >=2.14 && <2.20,
-        text >=2.0 && <2.2
+        text >=2.0 && <2.2,
+        transformers >=0.6.1 && <0.7
     default-language: Haskell2010
 
 -- The program in the README's Getting started section, built and run so that
