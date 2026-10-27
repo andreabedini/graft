@@ -1,5 +1,7 @@
 # Graft
 
+[![Hackage](https://img.shields.io/hackage/v/graft.svg)](https://hackage.haskell.org/package/graft)
+
 Lossless, immutable concrete syntax trees for Haskell, modelled on
 rust-analyzer's [Rowan](https://github.com/rust-analyzer/rowan).
 
@@ -14,14 +16,22 @@ Graft is experimental. The API may change before 1.0.
 
 ## Getting started
 
-Add `graft` to your `build-depends`. If your Hackage index doesn't have the
-release you want, take it from its tag in `cabal.project`:
+Graft is on [Hackage](https://hackage.haskell.org/package/graft). Add it to
+your `build-depends`:
+
+```cabal
+build-depends: graft ^>=0.1
+```
+
+Graft follows the [PVP](https://pvp.haskell.org/): `^>=0.1` accepts every
+0.1.x release and no breaking one. To try changes that aren't released yet,
+pin a commit in `cabal.project`:
 
 ```cabal
 source-repository-package
   type: git
   location: https://github.com/andreabedini/graft
-  tag: v0.1.0.0
+  tag: <commit>
 ```
 
 This program builds a tree, finds the number at byte offset 5, replaces it,
