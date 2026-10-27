@@ -5,7 +5,7 @@ module Main (main) where
 import AstTests (astProperties)
 import BuilderTests (builderProperties)
 import ChildEditTests (childEditProperties)
-import CursorEditTests (cursorEditProperties)
+import CursorTests (cursorProperties)
 import EditTests (editProperties)
 import FoldTests (foldProperties)
 import Control.Monad (unless)
@@ -15,6 +15,7 @@ import Data.List (find, isPrefixOf)
 import qualified Data.Text as Text
 import Graft
 import qualified Graft.Cursor as Cursor
+import qualified Graft.Edit as Edit
 import qualified Graft.Green as Green
 import qualified Graft.Range as Range
 import LineIndexTests (lineIndexProperties)
@@ -247,59 +248,22 @@ propCursorWalk model = conjoin
     walk path (Branch _ children) =
       Enter path : concat [walk (path ++ [i]) child | (i, child) <- zip [0 ..] children] ++ [Leave path]
 
--- Every occurrence reachable from an edited cursor, by any navigation, agrees
--- with a fresh cursor on the edited tree; a second edit continues from there.
-propCursorEditNavigation :: Model -> Model -> Model -> Property
-propCursorEditNavigation model first second =
-  forAll (elements (contexts model)) $ \(path, _, _, _) ->
-    case Cursor.at path (Cursor.fromGreen (compile model)) of
-      Left err -> counterexample (show err) False
-      Right focus ->
-        let edited = Cursor.replace (compile first) focus
-            tree = Cursor.tree edited
-            fresh = Cursor.fromGreen tree
-            moved =
-              [ Cursor.parent, Cursor.nextSibling, Cursor.previousSibling, Cursor.firstChild, Cursor.lastChild
-              , \cursor -> Cursor.nextSibling cursor >>= Cursor.parent
-              , \cursor -> Cursor.previousSibling cursor >>= Cursor.nextSibling >>= Cursor.parent
-              ]
-        in conjoin
-            [ map observe (Cursor.descendants (Cursor.root edited)) === map observe (Cursor.descendants fresh)
-            , conjoin
-                [ fmap observe (step edited) === fmap observe (either (const Nothing) step (Cursor.at path fresh))
-                | step <- moved
-                ]
-            , conjoin
-                [ counterexample (show other) $
-                    fmap (Cursor.tree . Cursor.replace (compile second)) (Cursor.at other (Cursor.root edited))
-                      === (replaceAt path (compile first) (compile model) >>= replaceAt other (compile second))
-                | (other, _, _, _) <- contexts model
-                ]
-            , fmap observe (Cursor.parent edited >>= Cursor.firstChild >>= Cursor.parent)
-                === fmap observe (Cursor.parent edited)
-            ]
-  where
-    observe cursor = (Cursor.path cursor, Cursor.range cursor, Cursor.green cursor)
-
+-- Replacing through a cursor keeps the rest of the tree, shifts the ranges
+-- after the edit, and leaves the cursor on the original.
 propCursorReplacement :: Model -> Model -> Property
 propCursorReplacement model replacement =
   forAll (elements (contexts model)) $ \(path, prefix, selected, suffix) ->
-    case Cursor.at path (Cursor.fromGreen (compile model)) of
+    case Cursor.at path (Cursor.fromGreen root) of
       Left err -> counterexample (show err) False
       Right focus ->
-        let editedFocus = Cursor.replace (compile replacement) focus
-            edited = Cursor.tree editedFocus
+        let edited = applied root [Edit.replace focus (compile replacement)]
             expectedRange = Range.fromLength (byteLength prefix) (byteLength (source replacement))
         in conjoin
-            [ Cursor.path editedFocus === path
-            , Cursor.range editedFocus === expectedRange
-            , Cursor.green editedFocus === compile replacement
-            ] .&&. conjoin
             [ Text.unpack (Green.render edited) === prefix ++ source replacement ++ suffix
             , counterexample "rebuilt caches" (validCaches edited)
             , fmap Cursor.range (Cursor.at path (Cursor.fromGreen edited)) === Right expectedRange
             , Text.unpack (Green.render (Cursor.green focus)) === source selected
-            , Cursor.green (Cursor.root focus) === compile model
+            , Cursor.tree focus === root
             , conjoin
                 [ fmap describe (Cursor.at other (Cursor.fromGreen edited))
                     === Right (other, compile subtree,
@@ -312,6 +276,8 @@ propCursorReplacement model replacement =
                 , let expectedStart = byteLength otherPrefix + shift
                 ]
             ]
+  where
+    root = compile model
 
 propCursorInvalidPaths :: Model -> Property
 propCursorInvalidPaths model = forAll (elements (contexts model)) $ \(path, _, selected, _) ->
@@ -457,7 +423,7 @@ cursorRegressions = once $ conjoin
       === "Node (Green.node Group [Token (Green.token Space \"\\t\")])"
   , Cursor.path sharedSecond === [1]
   , Cursor.green sharedSecond === shared
-  , Green.render (Cursor.tree (Cursor.replace (tok "long") sharedSecond)) === "along"
+  , fmap Green.render (Edit.apply (Cursor.tree sharedSecond) [Edit.replace sharedSecond (tok "long")]) === Right "along"
   , Cursor.range sharedSecond === Range.fromLength 1 1
   , Range.end (Cursor.range hugeCursor) === 2 ^ hugeDepth
   , offsetPaths (Cursor.tokenAt (2 ^ hugeDepth) hugeCursor)
@@ -495,13 +461,14 @@ lengthOverflow = once $ conjoin
   , overflows (edited (Green.replaceChild 1 half (Green.node Root [half, tok "x"])))
   , overflows (edited (Green.insertChild 1 half (Green.node Root [half])))
   , overflows (edited (Green.spliceChildren 0 0 [half, half] (Green.node Root [])))
-  , overflows (Cursor.tree (Cursor.replace half (edited (Cursor.at [1] (Cursor.fromGreen (Node (Green.node Root [half, tok "x"])))))))
+  , overflows (Edit.apply wide [Edit.replace (edited (Cursor.at [1] (Cursor.fromGreen wide))) half])
   , overflows (Green.render (Node (Green.node Root [half, half, half, half, tok "AB"])))
   , Green.length half === TextLength (2 ^ (finiteBitSize (0 :: Int) - 2))
   , Green.length (Node (Green.node Root [half, Node (Green.node Group [])])) === Green.length half
   ]
   where
     half = halfMax Group
+    wide = Node (Green.node Root [half, tok "x"])
     edited :: Show e => Either e a -> a
     edited = either (error . show) id
     tok = Token . Green.token Name
@@ -549,8 +516,7 @@ main = do
     , run "cursor parent, child and sibling navigation" propCursorNavigation
     , run "cursor token navigation" propCursorTokenNavigation
     , run "enter/leave walk and occurrence text" propCursorWalk
-    , run "persistent cursor replacement and shifted ranges" propCursorReplacement
-    , run "navigation and repeated edits from an edited cursor" propCursorEditNavigation
+    , run "replacement through a cursor and shifted ranges" propCursorReplacement
     , run "cursor invalid paths" propCursorInvalidPaths
     , run "boundary-aware token lookup" propCursorOffsetLookup
     , run "covering range lookup" propCoveringRange
@@ -559,7 +525,7 @@ main = do
     , run "error values are strict in their positions" strictErrors
     , run "cursor empty, boundary, shared-occurrence and large-range regressions" cursorRegressions
     , run "length overflow fails instead of wrapping" lengthOverflow
-    ] ++ [run title prop | (title, prop) <- builderProperties ++ childEditProperties ++ cursorEditProperties ++ editProperties ++ foldProperties ++ astProperties ++ lineIndexProperties]
+    ] ++ [run title prop | (title, prop) <- builderProperties ++ childEditProperties ++ cursorProperties ++ editProperties ++ foldProperties ++ astProperties ++ lineIndexProperties]
   unless (all isSuccess results) exitFailure
   where
     run title prop = do

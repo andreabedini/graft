@@ -1,7 +1,7 @@
-module CursorEditTests (cursorEditProperties) where
+module CursorTests (cursorProperties) where
 
 import qualified Data.Text as Text
-import Graft hiding (Change (..))
+import Graft
 import qualified Graft.Cursor as Cursor
 import qualified Graft.Range as Range
 import Test.QuickCheck
@@ -16,7 +16,6 @@ data Step
   | Last
   | Child Int
   | Top
-  | Replace Model
   | Look
   | Lookup Int
   deriving (Show)
@@ -24,12 +23,11 @@ data Step
 genStep :: Gen Step
 genStep = frequency
   [ (4, pure Next), (2, pure Previous), (3, pure Up), (3, pure First), (1, pure Last)
-  , (1, Child <$> chooseInt (0, 4)), (1, pure Top), (4, Replace <$> resize 4 arbitrary)
+  , (1, Child <$> chooseInt (0, 4)), (1, pure Top)
   , (2, pure Look), (1, Lookup <$> chooseInt (0, 40))
   ]
 
 shrinkStep :: Step -> [Step]
-shrinkStep (Replace model) = Replace <$> shrink model
 shrinkStep (Child index) = Child <$> shrink index
 shrinkStep (Lookup offset) = Lookup <$> shrink offset
 shrinkStep _ = []
@@ -39,12 +37,6 @@ modelAt [] model = Just model
 modelAt (index : rest) (Branch _ items)
   | index >= 0, index < length items = modelAt rest (items !! index)
 modelAt _ _ = Nothing
-
-modelReplace :: Path -> Model -> Model -> Model
-modelReplace [] replacement _ = replacement
-modelReplace (index : rest) replacement (Branch kind items) =
-  Branch kind (take index items ++ [modelReplace rest replacement (items !! index)] ++ drop (index + 1) items)
-modelReplace _ _ model = model
 
 modelKind :: Model -> Kind
 modelKind (Branch kind _) = kind
@@ -89,9 +81,9 @@ target model path step = case step of
       | otherwise = Nothing
     sibling offset = case reverse path of
       index : above
-        | Just parent <- modelAt (reverse above) model
+        | Just above' <- modelAt (reverse above) model
         , let next = index + offset
-        , next >= 0, next < length (modelChildren parent) -> Just (reverse above ++ [next])
+        , next >= 0, next < length (modelChildren above') -> Just (reverse above ++ [next])
       _ -> Nothing
 
 move :: Step -> Cursor Kind -> Maybe (Cursor Kind)
@@ -103,33 +95,28 @@ move step cursor = case step of
   Last -> Cursor.lastChild cursor
   Child index -> either (const Nothing) Just (Cursor.childAt index cursor)
   Top -> Just (Cursor.root cursor)
-  Replace replacement -> Just (Cursor.replace (compile replacement) cursor)
   _ -> Just cursor
 
 -- Run a program on a cursor and on the model. After every step the focus
 -- and its ancestors agree with the model; reading steps also compare the
 -- focus, its children and offset lookups from the root; at the end the
--- edited tree is the model's.
-propEditProgram :: Model -> Property
-propEditProgram start = forAllShrink (listOf genStep) (shrinkList shrinkStep) $ \steps ->
-  go (Cursor.fromGreen (compile start)) start [] steps
+-- cursor is still in the tree it started in.
+propProgram :: Model -> Property
+propProgram model = forAllShrink (listOf genStep) (shrinkList shrinkStep) $ \steps ->
+  go (Cursor.fromGreen tree) [] steps
   where
-    go cursor model path [] =
-      let edited = Cursor.tree cursor
-      in counterexample "final tree" (edited === compile model)
-           .&&. counterexample "final caches" (validCaches edited)
-           .&&. counterexample "path kept" (Cursor.path cursor === path)
-    go cursor model path (step : rest) = case (move step cursor, target model path step) of
-      (Nothing, Nothing) -> go cursor model path rest
+    tree = compile model
+    go cursor path [] =
+      counterexample "tree kept" (Cursor.tree cursor === tree)
+        .&&. counterexample "path kept" (Cursor.path cursor === path)
+    go cursor path (step : rest) = case (move step cursor, target model path step) of
+      (Nothing, Nothing) -> go cursor path rest
       (Just moved, Just path') ->
-        let model' = case step of
-              Replace replacement -> modelReplace path replacement model
-              _ -> model
-        in counterexample (show step) (check moved model' path' step) .&&. go moved model' path' rest
+        counterexample (show step) (check moved path' step) .&&. go moved path' rest
       (moved, path') ->
         counterexample (show step ++ ": cursor " ++ show (fmap Cursor.path moved) ++ ", model " ++ show path')
           False
-    check cursor model path step = conjoin $
+    check cursor path step = conjoin $
       [ observe cursor === expected model path
       , map observe (Cursor.ancestors cursor) === map (expected model) (drop 1 (reverse (inits' path)))
       ] ++ case step of
@@ -140,7 +127,7 @@ propEditProgram start = forAllShrink (listOf genStep) (shrinkList shrinkStep) $ 
               === [expected model (path ++ [index]) | index <- [0 .. length (maybe [] modelChildren (modelAt path model)) - 1]]
           ]
         Lookup offset ->
-          let fresh = Cursor.fromGreen (compile model)
+          let fresh = Cursor.fromGreen tree
               position = fromIntegral offset
               query = Range.fromLength position 0
           in [ fmap observe (Cursor.tokenAt position (Cursor.root cursor)) === fmap observe (Cursor.tokenAt position fresh)
@@ -149,32 +136,7 @@ propEditProgram start = forAllShrink (listOf genStep) (shrinkList shrinkStep) $ 
         _ -> []
     inits' path = [take count path | count <- [0 .. length path]]
 
--- Ancestors from every token of a walk that renames as it goes, as a
--- rename that checks scopes reads them, agree with the edited tree.
-propRenameWalk :: Model -> Model -> Property
-propRenameWalk start replacement =
-  case Cursor.firstToken (Cursor.fromGreen (compile start)) of
-    Nothing -> property True
-    Just first -> walk first start
-  where
-    walk cursor model =
-      let renamed
-            | Cursor.kind cursor == Name = Cursor.replace (compile replacement) cursor
-            | otherwise = cursor
-          path = Cursor.path cursor
-          model'
-            | Cursor.kind cursor == Name = modelReplace path replacement model
-            | otherwise = model
-          fresh = Cursor.at path (Cursor.fromGreen (compile model'))
-      in conjoin
-           [ map observe (Cursor.ancestors renamed) === either (const []) (map observe . Cursor.ancestors) fresh
-           , case Cursor.nextToken renamed of
-               Nothing -> Cursor.tree renamed === compile model'
-               Just next -> walk next model'
-           ]
-
-cursorEditProperties :: [(String, Property)]
-cursorEditProperties =
-  [ ("cursor programs of moves, edits and lookups against the model", property propEditProgram)
-  , ("ancestors during a renaming walk", property propRenameWalk)
+cursorProperties :: [(String, Property)]
+cursorProperties =
+  [ ("cursor programs of moves and lookups against the model", property propProgram)
   ]

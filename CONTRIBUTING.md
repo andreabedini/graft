@@ -50,10 +50,14 @@ The suites are grouped by module:
 
 - `test/Main.hs`: rendering, cached lengths, replacement at every path,
   cursor navigation, offset lookup and covering ranges. Expectations are
-  stated by path, through helpers in `TestModel.hs` written with cursors.
-- `test/CursorEditTests.hs`: random programs of moves, replacements and
-  lookups, run on a cursor and on the model, so that edits are checked while
-  the cursor keeps moving.
+  stated by path, through helpers in `TestModel.hs` written with cursors and
+  plans.
+- `test/CursorTests.hs`: random programs of moves and lookups, run on a
+  cursor and on the model.
+- `test/EditTests.hs`: rewrites against a model driven by a generated
+  decision table, and edit plans against a merge written over the model's
+  lists and a predicate stating the conflict rules, with the patch law for
+  text edits and sharing checked with `StableName`.
 - `test/FoldTests.hs`: `Green.foldM`, `fold`, `map` and `traverse` against the
   model, and forcing and hashing.
 - `test/BuilderTests.hs`: builders, checked against a separate tree model that

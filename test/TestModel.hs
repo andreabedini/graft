@@ -1,7 +1,7 @@
 module TestModel
   ( Kind (..), Model (..), scalar, genChar, genText, genKind, genModel
   , compile, source, byteLength, validCaches, contexts, hugeDepth, halfMax, overflows, failsWith
-  , PathEditError (..), elementAt, replaceAt, spliceChildrenAt, insertChildAt, removeChildAt
+  , PathEditError (..), elementAt, replaceAt, applied, spliceChildrenAt, insertChildAt, removeChildAt
   ) where
 
 import Control.Exception (ErrorCall (..), evaluate, try)
@@ -11,6 +11,7 @@ import Data.Char (chr, ord)
 import qualified Data.Text as Text
 import Graft
 import qualified Graft.Cursor as Cursor
+import qualified Graft.Edit as Edit
 import qualified Graft.Green as Green
 import Test.QuickCheck
 
@@ -119,31 +120,38 @@ contexts model = ([], "", model, "") : case model of
     ]
 
 
--- Edits by path, written with cursors as applications write them. The
--- properties state their expectations in terms of paths.
+-- Edits by path, written with cursors and plans as applications write them.
+-- The properties state their expectations in terms of paths.
 elementAt :: Path -> GreenElement k -> Either PathError (GreenElement k)
 elementAt path root = Cursor.green <$> Cursor.at path (Cursor.fromGreen root)
 
-replaceAt :: Path -> GreenElement k -> GreenElement k -> Either PathError (GreenElement k)
-replaceAt path replacement root =
-  Cursor.tree . Cursor.replace replacement <$> Cursor.at path (Cursor.fromGreen root)
+replaceAt :: Eq k => Path -> GreenElement k -> GreenElement k -> Either PathError (GreenElement k)
+replaceAt path replacement root = do
+  focus <- Cursor.at path (Cursor.fromGreen root)
+  pure (applied root [Edit.replace focus replacement])
+
+-- A plan on cursors of the base can only fail for the reasons the test
+-- states; anything else is a bug in the test.
+applied :: Eq k => GreenElement k -> [Edit k] -> GreenElement k
+applied root edits = either (error . show) id (Edit.apply root edits)
 
 data PathEditError = ChildEditPathError PathError | EditError ChildEditError
   deriving (Eq, Show)
 
-editAt
-  :: (Cursor k -> Either ChildEditError (Cursor k))
-  -> Path -> GreenElement k -> Either PathEditError (GreenElement k)
+editAt :: Eq k => (Cursor k -> Edit k) -> Path -> GreenElement k -> Either PathEditError (GreenElement k)
 editAt edit path root = case Cursor.at path (Cursor.fromGreen root) of
   Left err -> Left (ChildEditPathError err)
-  Right focus -> either (Left . EditError) (Right . Cursor.tree) (edit focus)
+  Right focus -> case Edit.apply root [edit focus] of
+    Left (InvalidSplice _ err) -> Left (EditError err)
+    Left other -> error ("unexpected plan error: " ++ show other)
+    Right edited -> Right edited
 
 spliceChildrenAt
-  :: Path -> Int -> Int -> [GreenElement k] -> GreenElement k -> Either PathEditError (GreenElement k)
-spliceChildrenAt path start end replacements = editAt (Cursor.spliceChildren start end replacements) path
+  :: Eq k => Path -> Int -> Int -> [GreenElement k] -> GreenElement k -> Either PathEditError (GreenElement k)
+spliceChildrenAt path start end replacements = editAt (\focus -> Edit.splice focus start end replacements) path
 
-insertChildAt :: Path -> Int -> GreenElement k -> GreenElement k -> Either PathEditError (GreenElement k)
-insertChildAt path index element = editAt (Cursor.insertChild index element) path
+insertChildAt :: Eq k => Path -> Int -> GreenElement k -> GreenElement k -> Either PathEditError (GreenElement k)
+insertChildAt path index element = editAt (\focus -> Edit.splice focus index index [element]) path
 
-removeChildAt :: Path -> Int -> GreenElement k -> Either PathEditError (GreenElement k)
-removeChildAt path index = editAt (Cursor.removeChild index) path
+removeChildAt :: Eq k => Path -> Int -> GreenElement k -> Either PathEditError (GreenElement k)
+removeChildAt path index = editAt (\focus -> Edit.splice focus index (index + 1) []) path

@@ -98,8 +98,7 @@ class AstView view => AstToken view
 -- | @matchNode accepts wrap@ is a 'fromCursor' for an 'AstNode' view. It wraps
 -- any node whose kind satisfies @accepts@, as in
 -- @fromCursor = Ast.matchNode (== CallKind) Call@, and rejects tokens. It
--- doesn't look at the node's children, so it doesn't build a node edited
--- through the cursor; see 'Cursor.replace'.
+-- looks at the kind only, not at the node's children.
 matchNode :: (kind -> Bool) -> (Cursor kind -> view) -> Cursor kind -> Maybe view
 matchNode accepts wrap cursor
   | not (Cursor.isToken cursor), accepts (Cursor.kind cursor) = Just (wrap cursor)

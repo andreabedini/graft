@@ -11,6 +11,7 @@ import Fixtures
 import Graft
 import qualified Graft.Ast as Ast
 import qualified Graft.Cursor as Cursor
+import qualified Graft.Edit as Edit
 import qualified Graft.Green as Green
 import qualified Graft.Range as Range
 import Residency (runResidency)
@@ -56,16 +57,16 @@ wideBench size = bgroup (show size)
           root = Cursor.fromGreen tree
           replacement = Token (Green.token Number (Text.singleton '2'))
           endAt index input = cursorEnd (checked (Cursor.childAt index (Cursor.fromGreen input)))
-          replace index input = Green.length (Cursor.tree (Cursor.replace replacement
-            (checked (Cursor.childAt index (Cursor.fromGreen input)))))
-          -- Replace every child through one cursor, moving to the next sibling
-          -- after each edit, as a codemod would.
-          editEach input = Green.length (Cursor.tree (go (checked (Cursor.childAt 0 (Cursor.fromGreen input)))))
-            where
-              go cursor = let edited = Cursor.replace replacement cursor
-                in maybe edited go (Cursor.nextSibling edited)
-          -- The same result from one edit of the parent.
-          editParent input = Green.length (Cursor.tree (Cursor.modify rebuild (Cursor.fromGreen input)))
+          replace index input = Green.length (checked (Edit.apply input
+            [Edit.replace (checked (Cursor.childAt index (Cursor.fromGreen input))) replacement]))
+          -- Replace every child in one rewrite, as a codemod would.
+          editEach input = Green.length (Edit.rewrite (\() cursor ->
+            if Cursor.isToken cursor then Replace replacement else Descend) () input)
+          -- The same change as a plan with one edit per child.
+          planEach input = Green.length (checked (Edit.apply input
+            [Edit.replace child replacement | child <- Cursor.children (Cursor.fromGreen input)]))
+          -- The same result from building the parent again.
+          editParent input = Green.length (rebuild input)
             where
               rebuild (Node parent) = Node (Green.node (Green.nodeKind parent) (map (const replacement) (Green.children parent)))
               rebuild token = token
@@ -89,6 +90,7 @@ wideBench size = bgroup (show size)
         , bench "splice-middle" $ whnf (cached . checked . Green.spliceChildren
             (size `div` 2) (size `div` 2) [replacement]) node
         , bench "edit-each-child" $ whnf editEach tree
+        , bench "plan-each-child" $ whnf planEach tree
         , bench "edit-parent-once" $ whnf editParent tree
         , bench "typed-first" $ whnf (maybe 0 (cursorEnd . toCursor) .
             (Ast.token :: Cursor Kind -> Maybe Named)) root
@@ -112,17 +114,20 @@ deepBench depth = bgroup (show depth)
         , bench "hash" $ whnf hash tree
         , bench "rnf" $ whnf rnf tree
         , bench "descend" $ whnf (cursorEnd . focused) tree
-        , bench "replace-path" $ whnf (Green.length . Cursor.tree . Cursor.replace replacement
-            . checked . (`Cursor.at` Cursor.fromGreen tree)) path
+        , bench "replace-path" $ whnf (\target -> Green.length (checked (Edit.apply tree
+            [Edit.replace (checked (Cursor.at target (Cursor.fromGreen tree))) replacement]))) path
         , bench "offset" $ whnf (offsetEnd 1 . Cursor.fromGreen) tree
-        , bench "focus-and-replace" $ whnf (Green.length . Cursor.tree . Cursor.replace replacement . focused) tree
+        , bench "focus-and-replace" $ whnf (\input -> Green.length (checked (Edit.apply input
+            [Edit.replace (focused input) replacement]))) tree
         ]
   , env (pure (PreparedCursor (checked (Cursor.at (replicate (depth + 1) 0)
-      (Cursor.fromGreen (Node (deepTree depth))))))) $ \prepared -> bgroup "focused"
-      [ bench "replace" $ whnf (Green.length . Cursor.tree . Cursor.replace
-          (Token (Green.token Number (Text.singleton '2')))) (preparedCursor prepared)
-      , bench "root" $ whnf (cursorEnd . Cursor.root) (preparedCursor prepared)
-      ]
+      (Cursor.fromGreen (Node (deepTree depth))))))) $ \prepared ->
+      let root = Cursor.tree (preparedCursor prepared)
+      in bgroup "focused"
+        [ bench "replace" $ whnf (\cursor -> Green.length (checked (Edit.apply root
+            [Edit.replace cursor (Token (Green.token Number (Text.singleton '2')))]))) (preparedCursor prepared)
+        , bench "root" $ whnf (cursorEnd . Cursor.root) (preparedCursor prepared)
+        ]
   ]
 
 chainBench :: Int -> Benchmark
@@ -161,12 +166,25 @@ documentBench = env (pure (Prepared (Node (documentTree 1000)))) $ \prepared ->
     , bench "100-edits-latest" $ whnf (Green.length . editMany 100 path) tree
     , bench "100-edits-history" $ whnf (List.foldl' (\total snapshot -> total + Green.length snapshot) 0 .
         snapshots 100 path) tree
-    , bench "rename-all" $ whnf (Green.length . renameAll Everywhere) tree
-    , bench "rename-all-ancestors" $ whnf (Green.length . renameAll InAncestors) tree
-    , bench "rename-all-groups" $ whnf (Green.length . renameAll InGroups) tree
+    , bench "rename-all" $ whnf (Green.length . renameTree Everywhere) tree
+    , bench "rename-all-ancestors" $ whnf (Green.length . renameTree InAncestors) tree
+    , bench "rename-all-groups" $ whnf (Green.length . renameTree InGroups) tree
+    , bgroup "apply-sparse" [bench (show count) $ whnf (Green.length . checked . Edit.apply tree . sparse root) count
+                            | count <- [1, 10, 100, 1000]]
+    , bench "text-edits-1000" $ nf (checked . Edit.textEdits tree . sparse root) 1000
+    , env (pure (Prepared (Node (documentTree 1000)))) $ \other ->
+        -- an edit whose cursor is in an equal tree built separately, so
+        -- that apply compares the trees instead of recognising the base
+        bench "apply-from-equal-tree" $ whnf (\input -> Green.length (checked (Edit.apply input
+          [Edit.replace (checked (Cursor.at path (Cursor.fromGreen (preparedTree other)))) renamed]))) tree
     ]
   where
-    renameAll scope input = maybe input Cursor.tree (renameWalk scope input)
+    renamed = Token (Green.token Name (Text.pack "renamed"))
+    -- Replace the name of every (1000 / count)-th line.
+    sparse root count =
+      [ Edit.replace (checked (Cursor.at [line, 0] root)) renamed
+      | line <- take count [0, 1000 `div` count ..]
+      ]
 
 offsetEnd :: TextLength -> Cursor Kind -> TextLength
 offsetEnd offset root = case Cursor.tokenAt offset root of

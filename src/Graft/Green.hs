@@ -6,7 +6,8 @@
 -- of some token, so rendering a tree gives back the source exactly. Green
 -- values have no parents or positions, so a subtree can appear in several
 -- places and in several versions of a tree. Use a cursor ("Graft.Cursor") to
--- see where an element is, and to edit inside a tree.
+-- see where an element is, and a plan or a rewrite ("Graft.Edit") to edit
+-- inside a tree.
 --
 -- This module is meant to be imported qualified; its types are also
 -- exported by "Graft":

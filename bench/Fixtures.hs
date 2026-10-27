@@ -6,12 +6,13 @@ module Fixtures
   ( Kind (..), Prepared (..), PreparedCursor (..), Named (..), Numbered (..), Grouped (..)
   , wideSource, wideTree, deepTree, chainTree, chainSource, documentTree, documentSource
   , forceElement, checked, selected, cached, cursorEnd, siblingSum
-  , buildTokens, buildMonadic, buildReuse, buildWrapped, editMany, snapshots, Scope (..), renameWalk, renamePasses, renameVisits
+  , buildTokens, buildMonadic, buildReuse, buildWrapped, editMany, snapshots, Scope (..), renameTree, renamePasses, renameVisited
   , checkFixtures
   ) where
 
 import Control.DeepSeq (NFData (..))
 import Control.Exception (evaluate)
+import Control.Monad.Trans.State.Strict (modify', runState)
 import Data.Hashable (Hashable (..))
 import Control.Monad (unless)
 import qualified Data.List as List
@@ -22,6 +23,7 @@ import qualified Graft.Ast as Ast
 import qualified Graft.Build as Build
 import qualified Graft.Builder as Builder
 import qualified Graft.Cursor as Cursor
+import qualified Graft.Edit as Edit
 import qualified Graft.Green as Green
 import qualified Graft.Range as Range
 
@@ -160,54 +162,52 @@ buildWrapped node = checked (Builder.finish closed)
 -- Each edit depends on the preceding snapshot. Distinct text prevents no-op
 -- updates. Force the cache on every step without walking shared descendants.
 editMany :: Int -> Path -> GreenElement Kind -> GreenElement Kind
-editMany count path root = List.foldl' step root [1 .. count]
-  where
-    step previous index =
-      let updated = Cursor.tree (Cursor.replace (Token (Green.token Number (Text.pack (show index))))
-            (checked (Cursor.at path (Cursor.fromGreen previous))))
-      in Green.length updated `seq` updated
+editMany count path root = List.foldl' (editAt path) root [1 .. count]
 
--- What a renaming walk reads before renaming each token, as a rename that
+-- One replacement at a path, through a plan of one edit.
+editAt :: Path -> GreenElement Kind -> Int -> GreenElement Kind
+editAt path previous index =
+  let focus = checked (Cursor.at path (Cursor.fromGreen previous))
+      updated = checked (Edit.apply previous [Edit.replace focus (Token (Green.token Number (Text.pack (show index))))])
+  in Green.length updated `seq` updated
+
+-- What a renaming rewrite reads before renaming each token, as a rename that
 -- checks scopes would: nothing, the ranges of its ancestors, or the ranges
 -- of its ancestors that cast to Grouped.
 data Scope = Everywhere | InAncestors | InGroups
 
--- Rename every Name token through one cursor, as in the Graft.Cursor
--- example, and return the cursor on the last token.
-renameWalk :: Scope -> GreenElement Kind -> Maybe (Cursor Kind)
-renameWalk scope input = fmap List.last (renameVisits scope (Cursor.fromGreen input))
+-- Rename every Name token in scope with one rewrite, as the Graft.Edit
+-- example does.
+renameTree :: Scope -> GreenElement Kind -> GreenElement Kind
+renameTree scope = Edit.rewrite (\() cursor -> renaming scope cursor) ()
 
--- Every cursor that a renaming walk from the root visits, after any edit.
-renameVisits :: Scope -> Cursor Kind -> Maybe [Cursor Kind]
-renameVisits scope start = go <$> Cursor.firstToken (Cursor.root start)
+renaming :: Scope -> Cursor Kind -> Change () Kind
+renaming scope cursor
+  | not (Cursor.isToken cursor) = Descend
+  | inScope && Cursor.kind cursor == Name = Replace (Token (Green.token Name "renamed"))
+  | otherwise = Skip
   where
-    go cursor = renamed : maybe [] go (Cursor.nextToken renamed)
-      where
-        renamed
-          | inScope cursor && Cursor.kind cursor == Name =
-              Cursor.replace (Token (Green.token Name "renamed")) cursor
-          | otherwise = cursor
-    inScope cursor = case scope of
+    inScope = case scope of
       Everywhere -> True
       InAncestors -> ends (Cursor.ancestors cursor) > 0
       InGroups -> ends (map toCursor (Ast.ancestors cursor :: [Grouped])) > 0
     ends = List.foldl' (\total ancestor -> total + cursorEnd ancestor) 0
 
--- The renaming walk repeated through one chain of cursors, each pass
--- starting from the root of the last cursor of the previous one.
-renamePasses :: Int -> GreenElement Kind -> Cursor Kind
-renamePasses count input = List.foldl' pass (Cursor.fromGreen input) [1 .. count]
+-- Every cursor the renaming rewrite visits, with its result.
+renameVisited :: Scope -> GreenElement Kind -> ([Cursor Kind], GreenElement Kind)
+renameVisited scope input =
+  let (result, visited) = runState (Edit.rewriteM step () input) []
+      step () cursor = modify' (cursor :) >> pure (renaming scope cursor)
+  in (visited, result)
+
+-- The renaming rewrite repeated, each pass on the result of the previous.
+renamePasses :: Int -> GreenElement Kind -> GreenElement Kind
+renamePasses count input = List.foldl' pass input [1 .. count]
   where
-    pass cursor _ = let next = maybe cursor List.last (renameVisits Everywhere cursor)
-      in cursorEnd next `seq` next
+    pass tree _ = let next = renameTree Everywhere tree in Green.length next `seq` next
 
 snapshots :: Int -> Path -> GreenElement Kind -> [GreenElement Kind]
-snapshots count path root = scanl step root [1 .. count]
-  where
-    step previous index =
-      let updated = Cursor.tree (Cursor.replace (Token (Green.token Number (Text.pack (show index))))
-            (checked (Cursor.at path (Cursor.fromGreen previous))))
-      in Green.length updated `seq` updated
+snapshots count path root = scanl (editAt path) root [1 .. count]
 
 -- Independent source checks guard the workload, not timing thresholds.
 checkFixtures :: IO ()
@@ -220,20 +220,24 @@ checkFixtures = do
       path = [499, 2]
       cursor = checked (Cursor.at path (Cursor.fromGreen document))
       updated = editMany 100 path document
-      renamed = fmap Cursor.tree (renameWalk Everywhere document)
+      renamed = renameTree Everywhere document
       expected = Text.concat [documentSource 499, Text.concat
         ["名500", "  = ", "100", " -- keep", "\r\n"],
         Text.concat (concatMap lineText [501 .. 1000])]
   assert "document source" (Green.render document == before)
   assert "repeated exact edits" (Green.render updated == expected)
-  assert "focus/path edit agreement" (Cursor.tree (Cursor.replace (Token (Green.token Number "100")) cursor) == updated)
+  assert "one edit and repeated edits agree"
+    (checked (Edit.apply document [Edit.replace cursor (Token (Green.token Number "100"))]) == updated)
   assert "original snapshot preserved" (Green.render document == before)
   assert "typed groups" (length (Ast.children (Cursor.fromGreen document) :: [Grouped]) == 1000)
-  assert "scoped renames" (all (\scope -> fmap Cursor.tree (renameWalk scope document) == renamed) [InAncestors, InGroups])
+  assert "renamed source" (Green.render renamed == Text.concat (concatMap renamedLine [1 .. 1000 :: Int]))
+  assert "scoped renames" (all (\scope -> renameTree scope document == renamed) [InAncestors, InGroups])
+  assert "rewrite visits every element" (length (fst (renameVisited Everywhere document)) == 1 + 1000 * 6)
   assert "history count" (length (snapshots 100 path document) == 101)
   putStrLn "Benchmark fixtures and observations: PASS"
   where
     assert label valid = unless valid (error ("benchmark check failed: " ++ label))
+    renamedLine index = "renamed" : drop 1 (lineText index)
     checkWide count = do
       let texts = wideSource count
           node = wideTree texts

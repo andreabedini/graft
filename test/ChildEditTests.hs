@@ -2,11 +2,11 @@
 
 module ChildEditTests (childEditProperties) where
 
-import Data.Bifunctor (bimap)
 import Data.List (isPrefixOf)
 import qualified Data.Text as Text
 import Graft
 import qualified Graft.Cursor as Cursor
+import qualified Graft.Edit as Edit
 import qualified Graft.Green as Green
 import qualified Graft.Range as Range
 import Test.QuickCheck
@@ -57,6 +57,14 @@ asNode model = case compile model of
   Node node -> node
   Token _ -> error "expected oracle node"
 
+childCursor :: Int -> Cursor Kind -> Cursor Kind
+childCursor index = either (error . show) id . Cursor.childAt index
+
+-- The tree an edit produced, or Nothing, so that plans and path helpers
+-- with different error types compare.
+accepted :: Either err (GreenElement Kind) -> Maybe (GreenElement Kind)
+accepted = either (const Nothing) Just
+
 propDirectSplice :: Property
 propDirectSplice = forAll genNode $ \model -> case model of
   Branch kind items -> forAll genForest $ \replacements ->
@@ -93,8 +101,6 @@ propNestedSplice = forAll (genTarget False) $ \(model, path, kind, items) ->
       Left err -> counterexample (show err) False
       Right focus -> conjoin
         [ matches expected edited
-        , bimap EditError Cursor.tree (Cursor.spliceChildren start end (map compile replacements) focus) === edited
-        , fmap Cursor.path (Cursor.spliceChildren start end (map compile replacements) focus) === Right path
         , Cursor.green (Cursor.root focus) === root
         , Cursor.path focus === path
         , Text.unpack (Green.render root) === source model
@@ -124,9 +130,15 @@ propInsertion = forAll (genTarget False) $ \(model, path, kind, items) ->
         , matches (modelReplace path updated model) edited
         , (direct >>= Green.removeChild index) === Right (asNode target)
         , (edited >>= removeChildAt path index) === Right root
+          -- the same insertion anchored at a sibling, where there is one
         , case Cursor.at path (Cursor.fromGreen root) of
             Left err -> counterexample (show err) False
-            Right focus -> bimap EditError Cursor.tree (Cursor.insertChild index element focus) === edited
+            Right focus ->
+              let anchored
+                    | index < length items = Edit.insertBefore (childCursor index focus) [element]
+                    | index > 0 = Edit.insertAfter (childCursor (index - 1) focus) [element]
+                    | otherwise = Edit.splice focus 0 0 [element]
+              in accepted (Edit.apply root [anchored]) === accepted edited
         ]
 
 propRemoval :: Property
@@ -143,7 +155,7 @@ propRemoval = forAll (genTarget True) $ \(model, path, kind, items) ->
       , (direct >>= Green.insertChild index (compile (items !! index))) === Right (asNode target)
       , case Cursor.at path (Cursor.fromGreen root) of
           Left err -> counterexample (show err) False
-          Right focus -> bimap EditError Cursor.tree (Cursor.removeChild index focus) === edited
+          Right focus -> accepted (Edit.apply root [Edit.remove (childCursor index focus)]) === accepted edited
       ]
 
 propNoOp :: Property
@@ -173,7 +185,7 @@ propInvalidBounds = forAll (genTarget False) $ \(model, path, kind, items) ->
         , spliceChildrenAt path start end [] root === Left (EditError err)
         , case Cursor.at path (Cursor.fromGreen root) of
             Left pathErr -> counterexample (show pathErr) False
-            Right focus -> fmap Cursor.tree (Cursor.spliceChildren start end [] focus) === Left err
+            Right focus -> Edit.apply root [Edit.splice focus start end []] === Left (InvalidSplice 0 err)
         ]
     | (start, end, err) <- bad
     ] ++
@@ -192,11 +204,8 @@ propInvalidTargets model = conjoin
         , removeChildAt path (-1) root === Left (EditError CannotEditTokenChildren)
         , case Cursor.at path (Cursor.fromGreen root) of
             Left err -> counterexample (show err) False
-            Right focus -> conjoin
-              [ fmap Cursor.tree (Cursor.spliceChildren (-1) (-2) [] focus) === Left CannotEditTokenChildren
-              , fmap Cursor.tree (Cursor.insertChild (-1) root focus) === Left CannotEditTokenChildren
-              , fmap Cursor.tree (Cursor.removeChild (-1) focus) === Left CannotEditTokenChildren
-              ]
+            Right focus ->
+              Edit.apply root [Edit.splice focus (-1) (-2) []] === Left (InvalidSplice 0 CannotEditTokenChildren)
         , badPath (path ++ [0]) CannotDescendIntoToken
         , badPath (path ++ [-1]) (NegativeChildIndex (-1))
         ]

@@ -21,7 +21,7 @@
 --
 -- * "Graft.Green": immutable nodes and tokens with cached lengths, and edits
 --   to a node's children.
--- * "Graft.Cursor": navigation, offset lookup and editing through a zipper.
+-- * "Graft.Cursor": navigation and offset lookup through a zipper.
 -- * "Graft.Edit": edits described against a tree and made all at once,
 --   as a plan of edits or as a top-down rewrite, with the unchanged
 --   subtrees shared and the text edits for an editor.

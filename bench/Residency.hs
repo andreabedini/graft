@@ -42,10 +42,10 @@ prepare scenario size edits = do
         "history" -> evaluated (Roots (snapshots edits path root))
         "cursor" -> pure (Focus (checked (Cursor.at path (Cursor.fromGreen root))))
         "detached-token" -> pure (Roots [Cursor.green (checked (Cursor.at path (Cursor.fromGreen root)))])
-        "renamed-tree" -> evaluated (Roots [maybe root Cursor.tree (renameWalk Everywhere root)])
-        "renamed-cursor" -> evaluated (Focus (selected (renameWalk Everywhere root)))
-        "renamed-passes" -> evaluated (Focus (renamePasses edits root))
-        "walk-cursors" -> evaluated (Visits (selected (renameVisits Everywhere (Cursor.fromGreen root))))
+        "renamed-tree" -> evaluated (Roots [renameTree Everywhere root])
+        "renamed-cursor" -> evaluated (Focus (selected (Cursor.lastToken (Cursor.fromGreen (renameTree Everywhere root)))))
+        "renamed-passes" -> evaluated (Roots [renamePasses edits root])
+        "walk-cursors" -> evaluated (Visits (fst (renameVisited Everywhere root)))
         _ -> error ("scenario must be tree, shared, latest, history, cursor, detached-token, "
           ++ "renamed-tree, renamed-cursor, renamed-passes or walk-cursors")
   where
