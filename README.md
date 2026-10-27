@@ -35,6 +35,7 @@ import qualified Data.Text.IO as Text
 import Graft
 import qualified Graft.Build as Build
 import qualified Graft.Cursor as Cursor
+import qualified Graft.Edit as Edit
 import qualified Graft.Green as Green
 import qualified Graft.Range as Range
 
@@ -56,8 +57,9 @@ main = do
   Text.putStr (Green.renderNode tree)
   case Cursor.covering (Range.fromLength 5 1) (Cursor.fromGreen (Node tree)) of
     Just number -> do
-      let edited = Cursor.replace (Token (Green.token Number "42")) number
-      Text.putStr (Green.render (Cursor.tree edited))
+      let edits = [Edit.replace number (Token (Green.token Number "42"))]
+      edited <- either (fail . show) pure (Edit.apply (Node tree) edits)
+      Text.putStr (Green.render edited)
     Nothing -> fail "nothing at offset 5"
 ```
 
@@ -73,8 +75,10 @@ The double space, the comment and the CRLF line ending survive the edit.
 `Cursor.covering` returns the innermost element that contains a range, here
 the one byte at offset 5. `Cursor.tokenAt 5` would return both tokens that
 touch offset 5, `"  = "` and `"1"`, as an editor's caret between them touches
-both. `Cursor.replace` returns a cursor on the edited tree, and `Cursor.tree`
-gives the whole edited tree.
+both. `Edit.replace` describes a change at a cursor, and `Edit.apply` makes a
+list of such changes to the tree they were made on, all at once, sharing
+everything the changes don't touch. `Edit.textEdits` gives the same changes
+as edits to the source text, for an editor.
 
 ## How it fits together
 
@@ -85,9 +89,12 @@ gives the whole edited tree.
   within a tree and between versions of it. `Green.foldM`, `Green.fold`,
   `Green.map` and `Green.traverse` cover a whole tree.
 - **Cursors** (`Graft.Cursor`) are zippers over a green tree. They know their
-  parent, siblings and absolute byte range, and find tokens by offset. An edit
-  through a cursor returns a cursor on the edited tree, so you can keep
-  navigating and editing; old cursors keep seeing the old tree.
+  parent, siblings and absolute byte range, and find tokens by offset.
+- **Edits** (`Graft.Edit`) are described against a tree through its cursors
+  and made all at once: a plan of replacements, splices, insertions and
+  removals, or a top-down rewrite that replaces elements as it goes. Every
+  decision reads the original tree, unchanged subtrees are shared with it,
+  and a plan also yields the edits to the source text.
 - **Builders** (`Graft.Build`, `Graft.Builder`) turn a parser's start/token/finish
   events into a tree, in a monad or as a pure value. Checkpoints let a parser
   wrap elements it has already emitted, as an operator-precedence parser needs

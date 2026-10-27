@@ -5,6 +5,7 @@ import qualified Data.Text.IO as Text
 import Graft
 import qualified Graft.Build as Build
 import qualified Graft.Cursor as Cursor
+import qualified Graft.Edit as Edit
 import qualified Graft.Green as Green
 import qualified Graft.Range as Range
 
@@ -26,6 +27,7 @@ main = do
   Text.putStr (Green.renderNode tree)
   case Cursor.covering (Range.fromLength 5 1) (Cursor.fromGreen (Node tree)) of
     Just number -> do
-      let edited = Cursor.replace (Token (Green.token Number "42")) number
-      Text.putStr (Green.render (Cursor.tree edited))
+      let edits = [Edit.replace number (Token (Green.token Number "42"))]
+      edited <- either (fail . show) pure (Edit.apply (Node tree) edits)
+      Text.putStr (Green.render edited)
     Nothing -> fail "nothing at offset 5"

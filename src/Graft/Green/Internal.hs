@@ -27,7 +27,9 @@ module Graft.Green.Internal
   , firstChildEndingAtOrAfter
     -- * Folding
   , foldM
-    -- * Unchecked updates
+    -- * Child edits
+  , ChildEditError (..)
+  , spliceBoundsError
   , checkedLength
   , setChild
   , setChildren
@@ -35,6 +37,7 @@ module Graft.Green.Internal
   ) where
 
 import Control.DeepSeq (NFData (..))
+import Control.Exception (Exception)
 import Control.Monad.ST (ST, runST)
 import Data.Functor.Identity (Identity (..))
 import Data.Foldable (toList)
@@ -292,6 +295,35 @@ firstChildEndingAtOrAfter node offset = go 0 (childCount node)
       | otherwise = go (middle + 1) high
       where
         middle = (low + high) `div` 2
+
+-- | Why a child edit failed. 'CannotEditTokenChildren' means the target is a
+-- token; the others report a bad child position (or both positions of a
+-- reversed range).
+data ChildEditError
+  = CannotEditTokenChildren
+  | NegativeChildBoundary !Int
+  | ReversedChildRange !Int !Int
+  | ChildBoundaryOutOfBounds !Int
+  deriving (Eq, Show)
+
+instance Exception ChildEditError
+
+instance NFData ChildEditError where
+  rnf err = err `seq` ()
+
+-- | Why @[start, end)@ is not a range of a node's children, if it isn't.
+-- Errors are checked in this order: a negative start or end, then
+-- @end < start@, then a start or end past the last child.
+spliceBoundsError :: Int -> Int -> GreenNode kind -> Maybe ChildEditError
+spliceBoundsError start end node
+  | start < 0 = Just (NegativeChildBoundary start)
+  | end < 0 = Just (NegativeChildBoundary end)
+  | end < start = Just (ReversedChildRange start end)
+  | start > count = Just (ChildBoundaryOutOfBounds start)
+  | end > count = Just (ChildBoundaryOutOfBounds end)
+  | otherwise = Nothing
+  where
+    count = childCount node
 
 -- | Replace the child at a valid index. The length is adjusted by the
 -- difference between the old and new child; offsets are reused when the
