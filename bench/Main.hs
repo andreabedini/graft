@@ -172,7 +172,7 @@ documentBench = env (pure (Prepared (Node (documentTree 1000)))) $ \prepared ->
     , bgroup "apply-sparse" [bench (show count) $ whnf (Green.length . checked . Edit.apply tree . sparse root) count
                             | count <- [1, 10, 100, 1000]]
     , bench "text-edits-1000" $ nf (checked . Edit.textEdits tree . sparse root) 1000
-    , env (pure (Prepared (Node (documentTree 1000)))) $ \other ->
+    , env (pure (Prepared (Node (documentTreeAgain 1000)))) $ \other ->
         -- an edit whose cursor is in an equal tree built separately, so
         -- that apply compares the trees instead of recognising the base
         bench "apply-from-equal-tree" $ whnf (\input -> Green.length (checked (Edit.apply input

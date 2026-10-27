@@ -4,7 +4,7 @@
 -- Workloads and observations shared by timing and residency runs.
 module Fixtures
   ( Kind (..), Prepared (..), PreparedCursor (..), Named (..), Numbered (..), Grouped (..)
-  , wideSource, wideTree, deepTree, chainTree, chainSource, documentTree, documentSource
+  , wideSource, wideTree, deepTree, chainTree, chainSource, documentTree, documentTreeAgain, documentSource
   , forceElement, checked, selected, cached, cursorEnd, siblingSum
   , buildTokens, buildMonadic, buildReuse, buildWrapped, editMany, snapshots, Scope (..), renameTree, renamePasses, renameVisited
   , checkFixtures
@@ -109,6 +109,12 @@ documentTree count = Green.node Root [Node (line index) | index <- [1 .. count]]
   where
     line index = Green.node Group (zipWith (\kind text -> Token (Green.token kind text))
       [Name, Trivia, Number, Trivia, Trivia] (lineText index))
+
+-- The same document built again, kept apart from documentTree by the
+-- optimiser, so that the two are equal but not the same object.
+documentTreeAgain :: Int -> GreenNode Kind
+documentTreeAgain = documentTree
+{-# NOINLINE documentTreeAgain #-}
 
 checked :: Show err => Either err a -> a
 checked = either (error . show) id
