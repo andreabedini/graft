@@ -242,6 +242,23 @@ regressions = once $ conjoin
           Left err -> counterexample (show err) False
           Right focus -> Cursor.range focus === Range.fromLength (2 ^ hugeDepth) 1
       ]
+  , -- Replacing children with as many of the same total length must still
+    -- move the offsets inside the range.
+    conjoin
+      [ counterexample which $ case edit of
+          Left err -> counterexample err False
+          Right edited -> conjoin
+            [ counterexample "cache invariant" (validCaches edited)
+            , Green.render edited === "abc\r\n-- keep\0"
+            , case Cursor.at [1] (Cursor.fromGreen edited) of
+                Left err -> counterexample (show err) False
+                Right focus -> Cursor.range focus === Range.fromLength 1 2
+            ]
+      | (which, edit) <-
+          [ ("plan", either (Left . show) Right (spliceChildrenAt [] 0 2 [tok "a", tok "bc"] (Node original)))
+          , ("green", either (Left . show) (Right . Node) (Green.spliceChildren 0 2 [tok "a", tok "bc"] original))
+          ]
+      ]
   , case Green.insertChild 0 (Node empty) (Green.node Root [tok "x"]) of
       Left err -> counterexample (show err) False
       Right node -> case Cursor.at [1] (Cursor.fromGreen (Node node)) of

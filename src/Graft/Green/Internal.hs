@@ -42,7 +42,6 @@ import Control.Exception (Exception)
 import Control.Monad.ST (ST, runST)
 import Data.Functor.Identity (Identity (..))
 import Data.Foldable (toList)
-import qualified Data.List as List
 import Data.Hashable (Hashable (..))
 import Data.Primitive.PrimArray
 import Data.Primitive.SmallArray
@@ -373,8 +372,8 @@ setChildren replacements@((first, _) : _) node@(GreenNode kind _ children starts
 -- boundary. The ranges must be sorted, lie within @[0, childCount node]@
 -- and not overlap. The untouched runs of children are copied as blocks and
 -- keep their offsets, shifted by the change in length before them; only
--- the new elements are measured. When every patch puts as many bytes in as
--- many children as it takes out, the offsets are reused.
+-- the new elements are measured. When every new element has the length of
+-- the child it replaces, the offsets are reused.
 patchChildren :: [(Int, Int, [GreenElement kind])] -> GreenNode kind -> GreenNode kind
 patchChildren [] node = node
 patchChildren patches@((first, _, _) : _) node@(GreenNode kind len children starts)
@@ -392,9 +391,14 @@ patchChildren patches@((first, _, _) : _) node@(GreenNode kind len children star
   where
     count = sizeofSmallArray children
     sameLayout = all unchanged patches
+    -- Every new element must have the length of the child it replaces: an
+    -- equal total over the range is not enough, as the offsets inside it
+    -- would move.
     unchanged (start, end, new) =
       length new == end - start
-        && List.foldl' addLength 0 (map elementTextLength new) == childStart node end - childStart node start
+        && and (zipWith sameLength [start ..] new)
+    sameLength index child =
+      elementTextLength child == childStart node (index + 1) - childStart node index
 
 -- The general case of 'patchChildren': a new offset array, with the
 -- untouched runs shifted and the new elements measured.

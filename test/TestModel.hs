@@ -13,6 +13,7 @@ import Graft
 import qualified Graft.Cursor as Cursor
 import qualified Graft.Edit as Edit
 import qualified Graft.Green as Green
+import qualified Graft.Range as Range
 import Test.QuickCheck
 
 data Kind = Root | Group | Name | Space | Comment
@@ -98,11 +99,21 @@ failsWith expected value = ioProperty $ do
     Left (ErrorCall message) -> counterexample message (expected `isInfixOf` message)
     Right _ -> counterexample ("no error mentioning " ++ show expected) False
 
+-- | Every node's cached length is the length of its text, and every child's
+-- cached offset is the length of the children before it.
 validCaches :: GreenElement Kind -> Bool
 validCaches tree = Green.length tree == byteLength (Text.unpack (Green.render tree))
   && case tree of
     Token _ -> True
-    Node node -> all validCaches (Green.children node)
+    Node node -> all validCaches (Green.children node) && offsetsAgree
+  where
+    offsetsAgree = and
+      [ Cursor.range child == Range.fromLength offset (Green.length (Cursor.green child))
+      | (offset, child) <- zip offsets (Cursor.children (Cursor.fromGreen tree))
+      ]
+    offsets = scanl (+) 0 (map Green.length (childrenOf tree))
+    childrenOf (Node node) = Green.children node
+    childrenOf (Token _) = []
 
 -- Each occurrence supplies its path and surrounding source. Contexts come
 -- from the model's leaf text, not from the editing implementation.
