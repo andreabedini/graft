@@ -33,6 +33,7 @@ module Graft.Green.Internal
   , checkedLength
   , setChild
   , setChildren
+  , patchChildren
   , spliceChildrenUnchecked
   ) where
 
@@ -41,6 +42,7 @@ import Control.Exception (Exception)
 import Control.Monad.ST (ST, runST)
 import Data.Functor.Identity (Identity (..))
 import Data.Foldable (toList)
+import qualified Data.List as List
 import Data.Hashable (Hashable (..))
 import Data.Primitive.PrimArray
 import Data.Primitive.SmallArray
@@ -364,6 +366,73 @@ setChildren replacements@((first, _) : _) node@(GreenNode kind _ children starts
             measure (index + 1) (addLength offset (elementTextLength child))
   total <- measure first (childStart node first)
   freeze kind total elements offsets
+
+-- | Replace several ranges of children at once, with one copy of the child
+-- array: each @(start, end, elements)@ puts the elements in place of the
+-- children in @[start, end)@, and an empty range inserts them at its
+-- boundary. The ranges must be sorted, lie within @[0, childCount node]@
+-- and not overlap. The untouched runs of children are copied as blocks and
+-- keep their offsets, shifted by the change in length before them; only
+-- the new elements are measured. When every patch puts as many bytes in as
+-- many children as it takes out, the offsets are reused.
+patchChildren :: [(Int, Int, [GreenElement kind])] -> GreenNode kind -> GreenNode kind
+patchChildren [] node = node
+patchChildren patches@((first, _, _) : _) node@(GreenNode kind len children starts)
+  | sameLayout = runST $ do
+      elements <- newSmallArray count missingChild
+      copySmallArray elements 0 children 0 first
+      let fill !source ((start, end, new) : rest) = do
+            copySmallArray elements source children source (start - source)
+            mapM_ (\(index, !child) -> writeSmallArray elements index child) (zip [start ..] new)
+            fill end rest
+          fill !source [] = copySmallArray elements source children source (count - source)
+      fill first patches
+      GreenNode kind len <$> unsafeFreezeSmallArray elements <*> pure starts
+  | otherwise = patchLayout patches node
+  where
+    count = sizeofSmallArray children
+    sameLayout = all unchanged patches
+    unchanged (start, end, new) =
+      length new == end - start
+        && List.foldl' addLength 0 (map elementTextLength new) == childStart node end - childStart node start
+
+-- The general case of 'patchChildren': a new offset array, with the
+-- untouched runs shifted and the new elements measured.
+patchLayout :: [(Int, Int, [GreenElement kind])] -> GreenNode kind -> GreenNode kind
+patchLayout [] node = node
+patchLayout patches@((first, _, _) : _) node@(GreenNode kind len children starts) = runST $ do
+  let count = sizeofSmallArray children
+      newCount = count + sum [length new - (end - start) | (start, end, new) <- patches]
+  elements <- newSmallArray newCount missingChild
+  offsets <- newPrimArray newCount
+  copySmallArray elements 0 children 0 first
+  copyPrimArray offsets 0 starts 0 first
+  let -- Copy an untouched run and its offsets, shifted by the delta so far.
+      keep !target !source !run !delta = do
+        copySmallArray elements target children source run
+        let shift !step
+              | step == run = pure ()
+              | otherwise = do
+                  writePrimArray offsets (target + step) (indexPrimArray starts (source + step) + delta)
+                  shift (step + 1)
+        shift 0
+      -- Write the new elements of a patch and measure them.
+      place !target !offset [] = pure (target, offset)
+      place !target !offset (!child : more) = do
+        writeSmallArray elements target child
+        writePrimArray offsets target (bytes offset)
+        place (target + 1) (addLength offset (elementTextLength child)) more
+      go !target !source !delta ((start, end, new) : rest) = do
+        let run = start - source
+        keep target source run delta
+        let from = childStart node start + TextLength delta
+        (target', to) <- place (target + run) from new
+        go target' end (delta + bytes to - bytes from - bytes (childStart node end - childStart node start)) rest
+      go !target !source !delta [] = do
+        keep target source (count - source) delta
+        pure delta
+  delta <- go first first 0 patches
+  freeze kind (checkedLength (len + TextLength delta)) elements offsets
 
 -- | Replace the children in @[start, end)@, which must satisfy
 -- @0 <= start <= end <= childCount node@. Offsets before the range are
