@@ -65,11 +65,11 @@ edits. Lines must be positive and edits nonnegative. The scenarios are:
 - `history`: the original and every edited root.
 - `cursor`: one cursor on a middle token.
 - `detached-token`: only that cursor's green token.
-- `renamed-tree`: the tree after renaming every `Name` token in one walk.
-- `renamed-cursor`: the last cursor of that walk.
-- `renamed-passes`: the last cursor after as many renaming passes as there
-  are edits, each starting from the previous pass's cursor.
-- `walk-cursors`: every cursor that one renaming walk visits.
+- `renamed-tree`: the tree after renaming every `Name` token in one rewrite.
+- `renamed-cursor`: a cursor on the last token of that tree.
+- `renamed-passes`: the tree after as many renaming passes as there are
+  edits, each rewriting the previous pass's result.
+- `walk-cursors`: every cursor that one renaming rewrite visits.
 
 Only `latest`, `history` and `renamed-passes` use the edit count; the others
 ignore it.

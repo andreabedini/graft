@@ -116,10 +116,11 @@ never characters.
 
 - The [API documentation](https://andreabedini.github.io/graft/) of the latest
   release gives each function's contract and cost. The introductions to
-  `Graft.Build`, `Graft.Cursor`, `Graft.Ast` and `Graft.LineIndex` each start
-  with an example: wrapping an operand at a checkpoint, renaming every matching
-  token in one pass, a typed view with a field, and converting Language Server
-  Protocol positions.
+  `Graft.Build`, `Graft.Cursor`, `Graft.Edit`, `Graft.Ast` and
+  `Graft.LineIndex` each start with an example: wrapping an operand at a
+  checkpoint, finding a token by offset and reading its ancestors, applying a
+  plan and renaming every matching token in one pass, a typed view with a
+  field, and converting Language Server Protocol positions.
 - [`examples/ExactUpdate.hs`](https://github.com/andreabedini/graft/blob/main/examples/ExactUpdate.hs)
   uses typed views to change a number's value while keeping its spelling
   (`001` stays `001` if the value doesn't change).
