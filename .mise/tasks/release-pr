@@ -49,10 +49,16 @@ for cabal in $cabals; do
   sed -i -E "s/^(version:[[:space:]]+).*/\1$next/" $cabal
 done
 
-# CHANGELOG.md at the top is the one the release notes come from. A package
-# in a subdirectory cannot list ../CHANGELOG.md in extra-doc-files, so it gets
-# a copy.
-git cliff --tag "v$next" -o CHANGELOG.md
+# CHANGELOG.md at the top is the one the release notes come from. The section
+# of the new release is prepended, so the sections of earlier releases, and
+# any edits made to them, stay as they are; the first release writes the whole
+# file. A package in a subdirectory cannot list ../CHANGELOG.md in
+# extra-doc-files, so it gets a copy.
+if [[ -f CHANGELOG.md ]]; then
+  git cliff --unreleased --tag "v$next" --prepend CHANGELOG.md
+else
+  git cliff --tag "v$next" -o CHANGELOG.md
+fi
 for cabal in ${(M)cabals:#*/*}; do
   cp CHANGELOG.md ${cabal:h}/CHANGELOG.md
 done

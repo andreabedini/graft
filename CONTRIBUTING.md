@@ -122,8 +122,8 @@ The `version:` fields in the `.cabal` files are the only source of the version. 
 The maintainer makes releases.
 
 1. Make sure that `main` is green.
-2. Run `mise run release-pr`. It reads the commits since the last release tag, sets the next version in every `.cabal` file, regenerates `CHANGELOG.md` with [git-cliff](https://git-cliff.org/), and opens a pull request titled `chore(release): VERSION`. If there are no releasable commits, it says so and does nothing.
-3. Review the pull request. To increment `A`, change the version by hand in every `.cabal` file, and change the `CHANGELOG.md` header and the commit description to the same version. Edits to `CHANGELOG.md` are lost at the next release, which regenerates it; wording that must stay goes in `cliff.toml`.
+2. Run `mise run release-pr`. It reads the commits since the last release tag, sets the next version in every `.cabal` file, prepends the section of the release to `CHANGELOG.md` with [git-cliff](https://git-cliff.org/), and opens a pull request titled `chore(release): VERSION`. If there are no releasable commits, it says so and does nothing.
+3. Review the pull request. To increment `A`, change the version by hand in every `.cabal` file, and change the `CHANGELOG.md` header and the commit description to the same version. Edits to the section of the release stay: later releases prepend their own sections and leave the earlier ones as they are. Wording that every section must have goes in `cliff.toml`.
 4. When `ci-ok` passes, merge the pull request with rebase merge.
 5. CI's `release` job sees the release commit on `main`. It publishes a GitHub release with the source distribution `graft-VERSION.tar.gz` and its Hackage documentation `graft-VERSION-docs.tar.gz`, their `SHA256SUMS`, and the notes from `CHANGELOG.md`. Publishing creates the tag. Then the `pages` job publishes the documentation of the release to <https://andreabedini.github.io/graft/>.
 6. Verify the release:
