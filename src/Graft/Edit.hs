@@ -51,7 +51,7 @@ module Graft.Edit
 
 import Control.DeepSeq (NFData (..))
 import Control.Exception (Exception)
-import Control.Monad (foldM)
+import Control.Monad (foldM, when)
 import Data.Functor.Identity (Identity (..))
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
@@ -288,26 +288,25 @@ tokenError plan = case reverse (planSplices plan) of
   Splicing position _ _ _ : _ -> InvalidSplice position CannotEditTokenChildren
   [] -> error "Graft.Edit: internal error: a plan below a token"
 
--- The children of a rebuilt node, as the merge lays them out.
+-- The changes to a node's children, as the merge lays them out, in order
+-- of position; the children between them are untouched.
 data Slot kind
-  = Original !Int
-  -- ^ the base child at this index, shared
-  | Replaced !Int !Int [GreenElement kind]
+  = Replaced !Int !Int [GreenElement kind]
   -- ^ the base children in this range, replaced by these elements; an
   -- empty range is an insertion at its boundary
   | Nested !Int (Plan kind)
   -- ^ the base child at this index, rebuilt by its plan
 
--- Lay out a node's children under its plan, checking the splices against
--- the node, against each other, and against the edits below.
+-- Lay out the changes to a node's children under its plan, checking the
+-- splices against the node, against each other, and against the edits
+-- below. The result is sorted by position and its ranges don't overlap.
 slots :: Plan kind -> GreenNode kind -> Either EditError [Slot kind]
 slots plan node = do
   splices <- traverse check (reverse (planSplices plan))
   let ordered = sortBy (comparing key) splices
   sweep Nothing ordered
-  layout 0 ordered
+  merge ordered (IntMap.toAscList (planBelow plan))
   where
-    count = Internal.childCount node
     key (Splicing position start end _) = (start, end, position)
     check splicing@(Splicing position start end _) =
       maybe (Right splicing) (Left . InvalidSplice position) (Internal.spliceBoundsError start end node)
@@ -320,24 +319,20 @@ slots plan node = do
       Just (coverEnd, coverPosition) | start < coverEnd -> conflict coverPosition position
       _ | end > start && maybe True ((end >) . fst) covering -> sweep (Just (end, position)) rest
         | otherwise -> sweep covering rest
-    -- The slots from a boundary on: the insertions there, then the child,
-    -- which a splice starting there consumes along with the following ones.
-    layout index pending = do
-      let (insertions, rest) = span (\(Splicing _ start end _) -> start == index && end == index) pending
-          inserted = [Replaced index index elements | Splicing _ _ _ elements <- insertions]
-      following <- case rest of
-        _ | index == count -> Right []
-        Splicing position start end elements : more | start == index -> do
-          mapM_ (conflict position . planFirst)
-            [below | (child, below) <- IntMap.toList (planBelow plan), start <= child, child < end]
-          (Replaced start end elements :) <$> layout end more
-        _ -> (slot :) <$> layout (index + 1) rest
-          where
-            slot = maybe (Original index) (Nested index) (IntMap.lookup index (planBelow plan))
-      pure (inserted ++ following)
+    -- Merge the splices with the children that have plans, by position: an
+    -- insertion at a boundary comes before the child there, and a splice
+    -- must not consume a child that has a plan.
+    merge [] below = Right [Nested index sub | (index, sub) <- below]
+    merge splices [] = Right [Replaced start end new | Splicing _ start end new <- splices]
+    merge splices@(Splicing position start end new : more) below@((index, sub) : rest)
+      | start > index = (Nested index sub :) <$> merge splices rest
+      | otherwise = do
+          when (end > start && end > index) (conflict position (planFirst sub))
+          (Replaced start end new :) <$> merge more below
 
 -- The element under a plan, built from the bottom up: each rebuilt node is
--- evaluated before its parent is laid out.
+-- evaluated before its parent is patched, with one copy of the parent's
+-- child array.
 rebuild :: Plan kind -> GreenElement kind -> Either EditError (GreenElement kind)
 rebuild plan element = do
   replaced <- replacementOf plan
@@ -347,14 +342,14 @@ rebuild plan element = do
       Token _ -> Left (tokenError plan)
       Node node -> do
         laid <- slots plan node
-        children <- concat <$> traverse (elements node) laid
-        let !rebuilt = Internal.greenNode (Green.nodeKind node) children
+        patches <- traverse (patch node) laid
+        let !rebuilt = Internal.patchChildren patches node
         Right (Node rebuilt)
   where
-    elements node slot = case slot of
-      Original index -> Right [Internal.childAt node index]
-      Replaced _ _ new -> Right new
-      Nested index below -> (: []) <$> rebuild below (Internal.childAt node index)
+    patch node slot = case slot of
+      Replaced start end new -> Right (start, end, new)
+      Nested index below ->
+        (\child -> (index, index + 1, [child])) <$> rebuild below (Internal.childAt node index)
 
 -- The text edits under a plan, in the order of the result, with ranges in
 -- the base's text.
@@ -370,7 +365,6 @@ collect plan offset element = do
         concat <$> traverse (edits node) laid
   where
     edits node slot = case slot of
-      Original _ -> Right []
       Replaced start end new ->
         let from = offset + Internal.childStart node start
             to = offset + Internal.childStart node end
