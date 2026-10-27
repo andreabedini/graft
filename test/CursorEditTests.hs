@@ -1,7 +1,7 @@
 module CursorEditTests (cursorEditProperties) where
 
 import qualified Data.Text as Text
-import Graft
+import Graft hiding (Change (..))
 import qualified Graft.Cursor as Cursor
 import qualified Graft.Range as Range
 import Test.QuickCheck

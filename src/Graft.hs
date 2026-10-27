@@ -14,6 +14,7 @@
 -- > import qualified Graft.Build as Build
 -- > import qualified Graft.Builder as Builder
 -- > import qualified Graft.Cursor as Cursor
+-- > import qualified Graft.Edit as Edit
 -- > import qualified Graft.Green as Green
 -- > import qualified Graft.LineIndex as LineIndex
 -- > import qualified Graft.Range as Range
@@ -21,6 +22,8 @@
 -- * "Graft.Green": immutable nodes and tokens with cached lengths, and edits
 --   to a node's children.
 -- * "Graft.Cursor": navigation, offset lookup and editing through a zipper.
+-- * "Graft.Edit": rewriting a tree top-down, with every call seeing the
+--   original and unchanged subtrees shared.
 -- * "Graft.Build" and "Graft.Builder": building trees from a parser's events,
 --   in a monad or as a pure value.
 -- * "Graft.Ast": typed views of your grammar's nodes and tokens.
@@ -74,6 +77,8 @@ module Graft
   , PathError (..)
   , TokenAtOffset (..)
   , WalkEvent (..)
+    -- * Editing
+  , Change (..)
     -- * Ranges and positions
   , TextRange
   , LineIndex
@@ -94,6 +99,7 @@ import Graft.Ast (AstNode, AstToken, AstView (..))
 import Graft.Build (Build)
 import Graft.Builder (Builder, BuilderError (..), Checkpoint)
 import Graft.Cursor (Cursor, Path, PathError (..), TokenAtOffset (..), WalkEvent (..))
+import Graft.Edit (Change (..))
 import Graft.Green (ChildEditError (..), GreenElement (..), GreenNode, GreenToken, TextLength (..))
 import Graft.LineIndex (LineIndex, Utf16Position (..), Utf8Position (..))
 import Graft.Range (TextRange)
